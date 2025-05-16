@@ -8,10 +8,14 @@ root.title("Trading Plan Generator")
 root.geometry("800x600")
 root.resizable(False, False)
 
+center_frame = ttk.Frame(root)
+center_frame.pack(expand=True, fill=BOTH)
+center_frame.place(relx=0.5, rely=0.5, anchor=CENTER)
+
 # --- API check ---
-api_status_label = ttk.Label(root, text="Checking API availability...")
+api_status_label = ttk.Label(center_frame, text="Checking API availability...")
 api_status_label.grid(column=0, row=1, padx=10, pady=10)
-spinner = ttk.Progressbar(root, orient=HORIZONTAL, length=300, mode='indeterminate')
+spinner = ttk.Progressbar(center_frame, orient=HORIZONTAL, length=300)
 spinner.grid(column=0, row=0, padx=10, pady=10)
 spinner.start()
 
@@ -19,7 +23,29 @@ spinner.start()
 def show_main_app():
     api_status_label.grid_remove()
     spinner.grid_remove()
-    ttk.Label(root, text="Main App Loaded!").grid(column=0, row=0, padx=10, pady=10)
+    
+    trading_plan_frame = ttk.Frame(root, padding=10, borderwidth=1, relief="groove")
+    trading_plan_frame.pack(fill=X, padx=10, pady=20)
+
+    header_frame = ttk.Frame(trading_plan_frame)
+    header_frame.pack(fill=X)
+
+    header_label = ttk.Label(header_frame, text="Generated Trading Plans", font=("Helvetica", 12, "bold"))
+    header_label.pack(side=LEFT)
+
+    create_button = ttk.Button(header_frame, text="Create", command=create_trading_plan, bootstyle="warning")
+    create_button.pack(side=RIGHT)
+
+    content_frame = ttk.Frame(trading_plan_frame)
+    content_frame.pack(fill=BOTH, expand=True, pady=10)
+
+    placeholder_label = ttk.Label(content_frame, text="List of your generated trading plans", anchor=CENTER)
+    placeholder_label.pack()
+
+def create_trading_plan():
+    from tkinter import messagebox
+
+    messagebox.showinfo("Create Trading Plan", "This feature is not yet implemented.")
 
 def check_api_availability(max_retries=10):
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
@@ -47,7 +73,6 @@ def start_api_check():
 root.after(100, start_api_check)
 
 def on_close():
-    if ttk.messagebox.askokcancel("Quit", "Do you want to quit?"):
-        root.destroy()
+    root.destroy()
 
 root.mainloop()
