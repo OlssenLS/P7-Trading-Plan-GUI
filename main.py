@@ -49,23 +49,28 @@ def create_trading_plan():
 
 def check_api_availability(max_retries=10):
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
-    endpoint_url = f"{base_url}/api/stocks?start_date=2023-01-01"
+    endpoints = [
+        f"{base_url}/api/stocks?start_date=2023-01-01",
+        f"{base_url}/api/stocks/BBCA?start_date=2023-01-01"
+    ]
+
     for attempt in range(max_retries):
-        try:
-            response = requests.get(endpoint_url)
-            if response.status_code == 200:
-                root.after(0, lambda: api_status_label.config(text="API is available!"))
-                root.after(500, show_main_app)
-                break
-            else:
-                raise Exception("API not available")
-        except Exception as e:
-            if attempt < max_retries - 1:
+        for endpoint_url in endpoints:
+            try:
+                response = requests.get(endpoint_url)
+                if response.status_code == 200:
+                    root.after(0, lambda: api_status_label.config(text="API is available!"))
+                    root.after(500, show_main_app)
+                    spinner.stop()
+                    return
+                else:
+                    raise Exception("API not available")
+            except Exception as e:
                 continue
-            else:
-                root.after(0, lambda: api_status_label.config(text="API is not available!"))
-        
-    spinner.stop()
+
+        if attempt == max_retries - 1:
+            root.after(0, lambda: api_status_label.config(text="API is not available!"))
+            spinner.stop()
 
 def start_api_check():
     threading.Thread(target=check_api_availability, daemon=True).start()
