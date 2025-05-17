@@ -22,7 +22,7 @@ center_frame.place(relx=0.5, rely=0.5, anchor=CENTER)
 # --- API check ---
 api_status_label = ttk.Label(center_frame, text="Checking API availability...")
 api_status_label.grid(column=0, row=1, padx=10, pady=10)
-spinner = ttk.Progressbar(center_frame, orient=HORIZONTAL, length=300)
+spinner = ttk.Progressbar(center_frame, orient=HORIZONTAL, length=300, mode="indeterminate")
 spinner.grid(column=0, row=0, padx=10, pady=10)
 spinner.start()
 
@@ -153,6 +153,7 @@ def detect_break_high_price(options, result_text):
                     broke_high = False
                     break_reasons = []
                     break_types = {}
+                    high_prices = {}
                     
                     # Debug values for high prices
                     five_days_high = None
@@ -183,8 +184,9 @@ def detect_break_high_price(options, result_text):
                                 if latest_close > five_days_high:
                                     # Found a new break
                                     break_5d = True
-                                    # Record the break date
+                                    # Record the break date and high price
                                     break_types["5d_break_date"] = latest_date_str
+                                    high_prices["5d"] = five_days_high
                             else:
                                 result_text.insert(END, f"  5-day data empty (unusual)\n")
                                 result_text.see(END)
@@ -239,8 +241,9 @@ def detect_break_high_price(options, result_text):
                                 if latest_close > one_month_high:
                                     # Found a new break
                                     break_1m = True
-                                    # Record the break date
+                                    # Record the break date and high price
                                     break_types["1m_break_date"] = latest_date_str
+                                    high_prices["1m"] = one_month_high
                             else:
                                 result_text.insert(END, f"  1-month data empty (unusual)\n")
                                 result_text.see(END)
@@ -295,8 +298,9 @@ def detect_break_high_price(options, result_text):
                                 if latest_close > two_months_high:
                                     # Found a new break
                                     break_2m = True
-                                    # Record the break date
+                                    # Record the break date and high price
                                     break_types["2m_break_date"] = latest_date_str
+                                    high_prices["2m"] = two_months_high
                             else:
                                 result_text.insert(END, f"  2-month data empty (unusual)\n")
                                 result_text.see(END)
@@ -351,8 +355,9 @@ def detect_break_high_price(options, result_text):
                                 if latest_close > three_months_high:
                                     # Found a new break
                                     break_3m = True
-                                    # Record the break date
+                                    # Record the break date and high price
                                     break_types["3m_break_date"] = latest_date_str
+                                    high_prices["3m"] = three_months_high
                             else:
                                 result_text.insert(END, f"  3-month data empty (unusual)\n")
                                 result_text.see(END)
@@ -385,7 +390,7 @@ def detect_break_high_price(options, result_text):
                     
                     # Save breaks to history
                     if broke_high:
-                        detected_stocks.append((stock, break_reasons, latest_close))
+                        detected_stocks.append((stock, break_reasons, latest_close, high_prices))
                         if stock not in detection_history[current_date]:
                             detection_history[current_date][stock] = {}
                         
@@ -415,8 +420,19 @@ def detect_break_high_price(options, result_text):
     # Show detected stocks
     if detected_stocks:
         result_text.insert(END, "Detected stocks breaking high price:\n\n")
-        for stock, reasons, close in detected_stocks:
+        for stock, reasons, close, highs in detected_stocks:
             result_text.insert(END, f"{stock}: {', '.join(reasons)} - Close: {close:.2f}\n")
+            # Add high price information for each break type
+            for reason in reasons:
+                if "5 Days" in reason and "5d" in highs:
+                    result_text.insert(END, f"    5 Days High: {highs['5d']:.2f}\n")
+                if "1 Month" in reason and "1m" in highs:
+                    result_text.insert(END, f"    1 Month High: {highs['1m']:.2f}\n")
+                if "2 Months" in reason and "2m" in highs:
+                    result_text.insert(END, f"    2 Months High: {highs['2m']:.2f}\n")
+                if "3 Months" in reason and "3m" in highs:
+                    result_text.insert(END, f"    3 Months High: {highs['3m']:.2f}\n")
+            result_text.insert(END, "\n")
     else:
         result_text.insert(END, "No stocks breaking high price detected.\n")
     
