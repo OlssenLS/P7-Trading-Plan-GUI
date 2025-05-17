@@ -3,6 +3,7 @@ import json
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+import concurrent.futures # Added for threading
 
 # Get the script directory for file paths
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -59,24 +60,174 @@ def save_detection_history(history):
     except Exception as e:
         print(f"Error saving detection history: {e}")
 
+def fetch_and_process_stock_data(stock, options, base_url, current_date_history, latest_date_for_run_dt):
+    """Fetches and processes data for a single stock. Designed to be run in a thread."""
+    try:
+        endpoint_url = f"{base_url}/api/stocks/{stock}?start_date=2023-01-01"
+        # progress_callback(f"Checking {stock}...\n") # Progress callback will be called from main thread based on status
+        
+        response = requests.get(endpoint_url, timeout=15) # Increased timeout slightly for threaded env
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, dict) and "historical_data" in data and data["historical_data"] and len(data["historical_data"]) > 0:
+                # progress_callback(f"  Got data for {stock} ({len(data['historical_data'])} records)\n")
+                
+                df = pd.DataFrame(data["historical_data"])
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.sort_values("date")
+                
+                if df.empty:
+                    # progress_callback(f"  No historical data rows for {stock} after processing.\n")
+                    return stock, None, f"No historical data for {stock}."
+
+                latest_close = df.iloc[-1]["close"]
+                latest_date_df = df.iloc[-1]["date"]
+                # Ensure latest_date_df is comparable with latest_date_for_run_dt (both should be datetime objects)
+                # latest_date_for_run_dt is passed as datetime.date, convert latest_date_df to date for comparison if needed or ensure consistency
+                # For simplicity, this example assumes direct comparison or that types are handled prior/post this function.
+                # For the purpose of break detection, we use the latest data from the stock's own history.
+                latest_date_str = latest_date_df.strftime("%Y-%m-%d")
+                
+                # debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
+                # progress_callback(debug_message)
+                
+                broke_high = False
+                break_reasons = []
+                break_types_for_history = {} # Stores break_date and days_since for current run history
+                high_prices_for_stock_output = {} # Stores actual high prices for new breaks for output summary
+
+                stock_hist_today = current_date_history.get(stock, {})
+
+                # 5-day high
+                if options["5_days"] and len(df) >= 6:
+                    is_new_break_5d = False
+                    current_period_high_5d = df["high"].iloc[-6:-1].max()
+                    if latest_close > current_period_high_5d:
+                        is_new_break_5d = True
+                        break_types_for_history["5d_break_date"] = latest_date_str
+                        high_prices_for_stock_output["5d"] = current_period_high_5d
+                    
+                    is_continued_break_5d = False
+                    if not is_new_break_5d and "5d_break_date" in stock_hist_today:
+                        hist_break_date = datetime.strptime(stock_hist_today["5d_break_date"], "%Y-%m-%d").date()
+                        days_since = (latest_date_df.date() - hist_break_date).days
+                        if 0 <= days_since <= KEEP_5D_BREAK_DAYS:
+                            is_continued_break_5d = True
+                            break_types_for_history["5d_break_date"] = stock_hist_today["5d_break_date"]
+                            break_types_for_history["5d_days_since"] = days_since
+                            high_prices_for_stock_output["5d"] = stock_hist_today.get("high_prices",{}).get("5d", current_period_high_5d)
+                    
+                    if is_new_break_5d or is_continued_break_5d:
+                        broke_high = True
+                        reason = "5 Days High (New Break)" if is_new_break_5d else f"5 Days High (Day {break_types_for_history.get('5d_days_since',0)} of {KEEP_5D_BREAK_DAYS})"
+                        break_reasons.append(reason)
+
+                # 1-month high
+                if options["1_month"] and len(df) >= 22:
+                    is_new_break_1m = False
+                    current_period_high_1m = df["high"].iloc[-22:-1].max()
+                    if latest_close > current_period_high_1m:
+                        is_new_break_1m = True
+                        break_types_for_history["1m_break_date"] = latest_date_str
+                        high_prices_for_stock_output["1m"] = current_period_high_1m
+
+                    is_continued_break_1m = False
+                    if not is_new_break_1m and "1m_break_date" in stock_hist_today:
+                        hist_break_date = datetime.strptime(stock_hist_today["1m_break_date"], "%Y-%m-%d").date()
+                        days_since = (latest_date_df.date() - hist_break_date).days
+                        if 0 <= days_since <= KEEP_1M_BREAK_DAYS:
+                            is_continued_break_1m = True
+                            break_types_for_history["1m_break_date"] = stock_hist_today["1m_break_date"]
+                            break_types_for_history["1m_days_since"] = days_since
+                            high_prices_for_stock_output["1m"] = stock_hist_today.get("high_prices",{}).get("1m", current_period_high_1m)
+
+                    if is_new_break_1m or is_continued_break_1m:
+                        broke_high = True
+                        reason = "1 Month High (New Break)" if is_new_break_1m else f"1 Month High (Day {break_types_for_history.get('1m_days_since',0)} of {KEEP_1M_BREAK_DAYS})"
+                        break_reasons.append(reason)
+                
+                # 2-months high
+                if options["2_months"] and len(df) >= 44:
+                    is_new_break_2m = False
+                    current_period_high_2m = df["high"].iloc[-44:-1].max()
+                    if latest_close > current_period_high_2m:
+                        is_new_break_2m = True
+                        break_types_for_history["2m_break_date"] = latest_date_str
+                        high_prices_for_stock_output["2m"] = current_period_high_2m
+                    
+                    is_continued_break_2m = False
+                    if not is_new_break_2m and "2m_break_date" in stock_hist_today:
+                        hist_break_date = datetime.strptime(stock_hist_today["2m_break_date"], "%Y-%m-%d").date()
+                        days_since = (latest_date_df.date() - hist_break_date).days
+                        if 0 <= days_since <= KEEP_2M_BREAK_DAYS:
+                            is_continued_break_2m = True
+                            break_types_for_history["2m_break_date"] = stock_hist_today["2m_break_date"]
+                            break_types_for_history["2m_days_since"] = days_since
+                            high_prices_for_stock_output["2m"] = stock_hist_today.get("high_prices",{}).get("2m", current_period_high_2m)
+
+                    if is_new_break_2m or is_continued_break_2m:
+                        broke_high = True
+                        reason = "2 Months High (New Break)" if is_new_break_2m else f"2 Months High (Day {break_types_for_history.get('2m_days_since',0)} of {KEEP_2M_BREAK_DAYS})"
+                        break_reasons.append(reason)
+
+                # 3-months high
+                if options["3_months"] and len(df) >= 66:
+                    is_new_break_3m = False
+                    current_period_high_3m = df["high"].iloc[-66:-1].max()
+                    if latest_close > current_period_high_3m:
+                        is_new_break_3m = True
+                        break_types_for_history["3m_break_date"] = latest_date_str
+                        high_prices_for_stock_output["3m"] = current_period_high_3m
+
+                    is_continued_break_3m = False
+                    if not is_new_break_3m and "3m_break_date" in stock_hist_today:
+                        hist_break_date = datetime.strptime(stock_hist_today["3m_break_date"], "%Y-%m-%d").date()
+                        days_since = (latest_date_df.date() - hist_break_date).days
+                        if 0 <= days_since <= KEEP_3M_BREAK_DAYS:
+                            is_continued_break_3m = True
+                            break_types_for_history["3m_break_date"] = stock_hist_today["3m_break_date"]
+                            break_types_for_history["3m_days_since"] = days_since
+                            high_prices_for_stock_output["3m"] = stock_hist_today.get("high_prices",{}).get("3m", current_period_high_3m)
+                    
+                    if is_new_break_3m or is_continued_break_3m:
+                        broke_high = True
+                        reason = "3 Months High (New Break)" if is_new_break_3m else f"3 Months High (Day {break_types_for_history.get('3m_days_since',0)} of {KEEP_3M_BREAK_DAYS})"
+                        break_reasons.append(reason)
+                
+                if broke_high:
+                    return stock, (break_reasons, latest_close, high_prices_for_stock_output, break_types_for_history), None # No error
+                else:
+                    return stock, None, f"No breaks for {stock}."
+
+            elif isinstance(data, dict) and data.get("message") == "No data found":
+                 return stock, None, f"No data found for {stock} via API."
+            else:
+                return stock, None, f"Unexpected data structure for {stock}."
+        else:
+            return stock, None, f"API error for {stock}: {response.status_code} {response.text}"
+        
+    except requests.exceptions.Timeout:
+        return stock, None, f"Request timed out for {stock}."
+    except Exception as e:
+        return stock, None, f"Error processing {stock}: {str(e)}"
+
 def detect_break_high_price(options, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback):
-    """Detect break high price based on selected options and update UI via callbacks."""
+    """Detect break high price based on selected options and update UI via callbacks. Uses threading for speed."""
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     
-    # Initialize DATA_DIR and STOCKS_FILE creation/check here as well,
-    # to ensure they exist when running this module, e.g. for tests or if main.py's init didn't run.
     os.makedirs(DATA_DIR, exist_ok=True)
-    stocks = get_stock_list() # This will also ensure stocks.txt exists
+    stocks = get_stock_list()
     
     output_list_for_plan.clear()
     set_continue_button_state_callback(False)
     
     if not any(options.values()):
         progress_callback("Please select at least one period option.\n")
-        completion_callback([], "Please select at least one period option.\n", "") # Pass empty list for detected_stocks
+        completion_callback([], "Please select at least one period option.\n", "")
         return
     
-    progress_callback("Starting detection...\n")
+    progress_callback("Starting detection (using threads)...\n")
     if not stocks:
         message = "Stock list is empty. Please check stocks.txt.\n"
         progress_callback(message)
@@ -86,201 +237,71 @@ def detect_break_high_price(options, output_list_for_plan, progress_callback, co
     progress_callback(f"Total stocks to check: {len(stocks)}\n")
     
     detection_history = load_detection_history()
-    current_date = datetime.now().strftime("%Y-%m-%d")
+    current_date_str = datetime.now().strftime("%Y-%m-%d")
+    latest_date_for_run_dt = datetime.now().date() # For comparing days_since uniformly
     
-    if current_date not in detection_history:
-        detection_history[current_date] = {}
+    if current_date_str not in detection_history:
+        detection_history[current_date_str] = {}
         
-    dates = sorted(list(detection_history.keys()))
-    if len(dates) > 10:
-        for old_date in dates[:-10]:
-            if old_date in detection_history:
-                del detection_history[old_date]
+    # Prune old history (more than 10 days)
+    # This should ideally be based on the actual dates, not just number of keys if keys aren't guaranteed daily
+    sorted_history_dates = sorted(list(detection_history.keys()))
+    if len(sorted_history_dates) > 10:
+        for old_date_key in sorted_history_dates[:-10]: # Keep the 10 most recent keys
+            if old_date_key in detection_history:
+                del detection_history[old_date_key]
     
     detected_stocks_for_processing = [] 
-    
-    for stock in stocks:
-        try:
-            endpoint_url = f"{base_url}/api/stocks/{stock}?start_date=2023-01-01" # Use a reasonable start_date
-            progress_callback(f"Checking {stock}...\n")
-            
-            response = requests.get(endpoint_url, timeout=10) # Added timeout
-            
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, dict) and "historical_data" in data and data["historical_data"] and len(data["historical_data"]) > 0:
-                    progress_callback(f"  Got data for {stock} ({len(data['historical_data'])} records)\n")
+    processed_count = 0
+    total_stocks = len(stocks)
+
+    # Using ThreadPoolExecutor for concurrent requests
+    # Max workers can be tuned. Too many might overwhelm the API or local resources.
+    # Let's start with a reasonable number, e.g., 5 or 10.
+    MAX_WORKERS = 10 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # Map of future to stock symbol for tracking
+        future_to_stock = {executor.submit(fetch_and_process_stock_data, 
+                                          stock, 
+                                          options, 
+                                          base_url, 
+                                          detection_history.get(current_date_str, {}), # Pass today's history for that stock
+                                          latest_date_for_run_dt):
+                           stock for stock in stocks}
+        
+        for future in concurrent.futures.as_completed(future_to_stock):
+            stock_symbol = future_to_stock[future]
+            try:
+                stock_symbol_result, result_data, error_message = future.result()
+                
+                processed_count += 1
+                progress_callback(f"({processed_count}/{total_stocks}) Processed {stock_symbol_result}. ") 
+
+                if error_message:
+                    progress_callback(f"Skipped: {error_message}\n")
+                
+                if result_data: # (break_reasons, latest_close, high_prices_for_stock_output, break_types_for_history)
+                    break_reasons, latest_close, high_prices_output, break_types_hist = result_data
+                    detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, high_prices_output))
                     
-                    df = pd.DataFrame(data["historical_data"])
-                    df["date"] = pd.to_datetime(df["date"])
-                    df = df.sort_values("date")
+                    progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
+
+                    # Update history for this stock for today
+                    if stock_symbol_result not in detection_history[current_date_str]:
+                        detection_history[current_date_str][stock_symbol_result] = {}
                     
-                    if df.empty:
-                        progress_callback(f"  No historical data rows for {stock} after processing.\n")
-                        continue
-
-                    latest_close = df.iloc[-1]["close"]
-                    latest_date = df.iloc[-1]["date"]
-                    latest_date_str = latest_date.strftime("%Y-%m-%d")
-                    
-                    debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
-                    progress_callback(debug_message)
-                    
-                    available_dates = sorted(df["date"].unique())
-                    broke_high = False
-                    break_reasons = []
-                    break_types = {} # Stores break_date and days_since for current run
-                    high_prices_for_stock = {} # Stores actual high prices for new breaks this run
-
-                    # 5-day high
-                    if options["5_days"] and len(df) >= 6:
-                        is_new_break_5d = False
-                        current_period_high_5d = df["high"].iloc[-6:-1].max() # High of previous 5 days
-
-                        if latest_close > current_period_high_5d:
-                            is_new_break_5d = True
-                            break_types["5d_break_date"] = latest_date_str
-                            high_prices_for_stock["5d"] = current_period_high_5d
-                            progress_callback(f"  NEW 5-day high break: {current_period_high_5d:.2f}, Close: {latest_close:.2f}\n")
-                        
-                        is_continued_break_5d = False
-                        if not is_new_break_5d and stock in detection_history.get(current_date, {}):
-                            stock_hist = detection_history[current_date].get(stock, {})
-                            if "5d_break_date" in stock_hist:
-                                hist_break_date = datetime.strptime(stock_hist["5d_break_date"], "%Y-%m-%d").date()
-                                days_since = (latest_date.date() - hist_break_date).days
-                                if 0 <= days_since <= KEEP_5D_BREAK_DAYS: # Allow same day as continued
-                                    is_continued_break_5d = True
-                                    break_types["5d_break_date"] = stock_hist["5d_break_date"] # Preserve original break date
-                                    break_types["5d_days_since"] = days_since
-                                    high_prices_for_stock["5d"] = stock_hist.get("high_prices",{}).get("5d", current_period_high_5d)
-                                    progress_callback(f"  CONTINUED 5-day high break (Day {days_since})\n")
-                        
-                        if is_new_break_5d or is_continued_break_5d:
-                            broke_high = True
-                            if "5d_days_since" in break_types:
-                                break_reasons.append(f"5 Days High (Day {break_types['5d_days_since']} of {KEEP_5D_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("5 Days High (New Break)")
-
-                    # 1-month high
-                    if options["1_month"] and len(df) >= 22: # Approx 22 trading days + current
-                        is_new_break_1m = False
-                        current_period_high_1m = df["high"].iloc[-22:-1].max()
-
-                        if latest_close > current_period_high_1m:
-                            is_new_break_1m = True
-                            break_types["1m_break_date"] = latest_date_str
-                            high_prices_for_stock["1m"] = current_period_high_1m
-                            progress_callback(f"  NEW 1-month high break: {current_period_high_1m:.2f}, Close: {latest_close:.2f}\n")
-
-                        is_continued_break_1m = False
-                        if not is_new_break_1m and stock in detection_history.get(current_date, {}):
-                            stock_hist = detection_history[current_date].get(stock, {})
-                            if "1m_break_date" in stock_hist:
-                                hist_break_date = datetime.strptime(stock_hist["1m_break_date"], "%Y-%m-%d").date()
-                                days_since = (latest_date.date() - hist_break_date).days
-                                if 0 <= days_since <= KEEP_1M_BREAK_DAYS:
-                                    is_continued_break_1m = True
-                                    break_types["1m_break_date"] = stock_hist["1m_break_date"]
-                                    break_types["1m_days_since"] = days_since
-                                    high_prices_for_stock["1m"] = stock_hist.get("high_prices",{}).get("1m", current_period_high_1m)
-                                    progress_callback(f"  CONTINUED 1-month high break (Day {days_since})\n")
-
-                        if is_new_break_1m or is_continued_break_1m:
-                            broke_high = True
-                            if "1m_days_since" in break_types:
-                                break_reasons.append(f"1 Month High (Day {break_types['1m_days_since']} of {KEEP_1M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("1 Month High (New Break)")
-                    
-                    # 2-months high
-                    if options["2_months"] and len(df) >= 44: # Approx 44 trading days + current
-                        is_new_break_2m = False
-                        current_period_high_2m = df["high"].iloc[-44:-1].max()
-
-                        if latest_close > current_period_high_2m:
-                            is_new_break_2m = True
-                            break_types["2m_break_date"] = latest_date_str
-                            high_prices_for_stock["2m"] = current_period_high_2m
-                            progress_callback(f"  NEW 2-months high break: {current_period_high_2m:.2f}, Close: {latest_close:.2f}\n")
-
-                        is_continued_break_2m = False
-                        if not is_new_break_2m and stock in detection_history.get(current_date, {}):
-                            stock_hist = detection_history[current_date].get(stock, {})
-                            if "2m_break_date" in stock_hist:
-                                hist_break_date = datetime.strptime(stock_hist["2m_break_date"], "%Y-%m-%d").date()
-                                days_since = (latest_date.date() - hist_break_date).days
-                                if 0 <= days_since <= KEEP_2M_BREAK_DAYS:
-                                    is_continued_break_2m = True
-                                    break_types["2m_break_date"] = stock_hist["2m_break_date"]
-                                    break_types["2m_days_since"] = days_since
-                                    high_prices_for_stock["2m"] = stock_hist.get("high_prices",{}).get("2m", current_period_high_2m)
-                                    progress_callback(f"  CONTINUED 2-months high break (Day {days_since})\n")
-                        
-                        if is_new_break_2m or is_continued_break_2m:
-                            broke_high = True
-                            if "2m_days_since" in break_types:
-                                break_reasons.append(f"2 Months High (Day {break_types['2m_days_since']} of {KEEP_2M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("2 Months High (New Break)")
-
-                    # 3-months high
-                    if options["3_months"] and len(df) >= 66: # Approx 66 trading days + current
-                        is_new_break_3m = False
-                        current_period_high_3m = df["high"].iloc[-66:-1].max()
-
-                        if latest_close > current_period_high_3m:
-                            is_new_break_3m = True
-                            break_types["3m_break_date"] = latest_date_str
-                            high_prices_for_stock["3m"] = current_period_high_3m
-                            progress_callback(f"  NEW 3-months high break: {current_period_high_3m:.2f}, Close: {latest_close:.2f}\n")
-
-                        is_continued_break_3m = False
-                        if not is_new_break_3m and stock in detection_history.get(current_date, {}):
-                            stock_hist = detection_history[current_date].get(stock, {})
-                            if "3m_break_date" in stock_hist:
-                                hist_break_date = datetime.strptime(stock_hist["3m_break_date"], "%Y-%m-%d").date()
-                                days_since = (latest_date.date() - hist_break_date).days
-                                if 0 <= days_since <= KEEP_3M_BREAK_DAYS:
-                                    is_continued_break_3m = True
-                                    break_types["3m_break_date"] = stock_hist["3m_break_date"]
-                                    break_types["3m_days_since"] = days_since
-                                    high_prices_for_stock["3m"] = stock_hist.get("high_prices",{}).get("3m", current_period_high_3m)
-                                    progress_callback(f"  CONTINUED 3-months high break (Day {days_since})\n")
-
-                        if is_new_break_3m or is_continued_break_3m:
-                            broke_high = True
-                            if "3m_days_since" in break_types:
-                                break_reasons.append(f"3 Months High (Day {break_types['3m_days_since']} of {KEEP_3M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("3 Months High (New Break)")
-                    
-                    if broke_high:
-                        detected_stocks_for_processing.append((stock, break_reasons, latest_close, high_prices_for_stock))
-                        
-                        # Update history for this stock for today
-                        if stock not in detection_history[current_date]:
-                            detection_history[current_date][stock] = {}
-                        
-                        # Persist break types (dates, days_since) and associated high prices
-                        for key, value in break_types.items():
-                             detection_history[current_date][stock][key] = value
-                        if high_prices_for_stock: # only save if there are new highs determined
-                            detection_history[current_date][stock]["high_prices"] = {**detection_history[current_date][stock].get("high_prices",{}), **high_prices_for_stock}
-
-
-                elif isinstance(data, dict) and data.get("message") == "No data found":
-                     progress_callback(f"  No data found for {stock} via API.\n")
-                else:
-                    progress_callback(f"  Unexpected data structure or empty historical_data for {stock}.\n")
-            else:
-                progress_callback(f"  API error for {stock}: {response.status_code} {response.text}\n")
-            
-        except requests.exceptions.Timeout:
-            progress_callback(f"Error processing {stock}: Request timed out.\n")
-        except Exception as e:
-            progress_callback(f"Error processing {stock}: {str(e)}\n")
+                    # Persist break types (dates, days_since) and associated high prices
+                    for key, value in break_types_hist.items():
+                         detection_history[current_date_str][stock_symbol_result][key] = value
+                    if high_prices_output: 
+                        # Ensure high_prices key exists before trying to merge with it
+                        if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
+                            detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
+                        detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
+                
+            except Exception as exc:
+                processed_count += 1 # Still count as processed for progress
+                progress_callback(f"({processed_count}/{total_stocks}) Error processing {stock_symbol}: {exc}\n")
     
     save_detection_history(detection_history)
     output_list_for_plan.extend(detected_stocks_for_processing)

@@ -21,7 +21,7 @@ SAVED_PLANS_FILE = os.path.join(DATA_DIR, "saved_trading_plans.json")
 
 root = ttk.Window(themename="darkly")
 root.title("Trading Plan Generator")
-root.geometry("800x1000")
+root.geometry("1200x600")
 root.resizable(True, True)
 
 center_frame = ttk.Frame(root)
@@ -76,12 +76,22 @@ def save_plans_to_file(new_plans_to_add):
     existing_plans_list = load_plans_from_file()
     
     # For easier update, convert list of plans to a dict keyed by stock
-    # Assuming each plan dictionary has a "stock" key
-    updated_plans_dict = {plan['stock']: plan for plan in existing_plans_list if 'stock' in plan} # Ensure stock key exists
+    updated_plans_dict = {plan['stock']: plan for plan in existing_plans_list if 'stock' in plan}
     
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
     for new_plan in new_plans_to_add:
-        if 'stock' in new_plan: # Ensure stock key exists in new plan
-            updated_plans_dict[new_plan['stock']] = new_plan # Add or update
+        if 'stock' in new_plan:
+            stock_key = new_plan['stock']
+            if stock_key in updated_plans_dict:
+                # If plan exists, update it but preserve original creation_date if it exists
+                existing_plan = updated_plans_dict[stock_key]
+                new_plan['creation_date'] = existing_plan.get('creation_date', current_time_str)
+                updated_plans_dict[stock_key] = new_plan 
+            else:
+                # New plan, add creation_date
+                new_plan['creation_date'] = current_time_str
+                updated_plans_dict[stock_key] = new_plan
         
     final_plans_list = list(updated_plans_dict.values())
     
@@ -415,7 +425,7 @@ def show_main_page():
     ttk.Label(main_page_display_frame, text="Saved Trading Plans:", font=("Helvetica", 10, "italic")).pack(anchor=W, pady=(5,5))
     
     # Define columns for the main display Treeview
-    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status") # Updated columns
+    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated columns
     main_plan_display_treeview = ttk.Treeview(main_page_display_frame, columns=plan_columns, show="headings", height=10)
     
     # Define headings for the Treeview
@@ -423,18 +433,20 @@ def show_main_page():
     main_plan_display_treeview.heading("entry_price", text="Entry")
     main_plan_display_treeview.heading("stop_loss", text="Stop Loss")
     main_plan_display_treeview.heading("tp1", text="TP1")
-    main_plan_display_treeview.heading("tp2", text="TP2") # Added
-    main_plan_display_treeview.heading("tp3", text="TP3") # Added
+    main_plan_display_treeview.heading("tp2", text="TP2")
+    main_plan_display_treeview.heading("tp3", text="TP3")
     main_plan_display_treeview.heading("status", text="Status")
+    main_plan_display_treeview.heading("creation_date", text="Date Created") # Added
 
     # Adjust column widths for the Treeview
     main_plan_display_treeview.column("stock", width=80, anchor=CENTER)
-    main_plan_display_treeview.column("entry_price", width=100, anchor=E)
-    main_plan_display_treeview.column("stop_loss", width=100, anchor=E)
-    main_plan_display_treeview.column("tp1", width=100, anchor=E)
-    main_plan_display_treeview.column("tp2", width=100, anchor=E) # Added
-    main_plan_display_treeview.column("tp3", width=100, anchor=E) # Added
-    main_plan_display_treeview.column("status", width=80, anchor=CENTER) # Adjusted width
+    main_plan_display_treeview.column("entry_price", width=90, anchor=E) # Adjusted
+    main_plan_display_treeview.column("stop_loss", width=90, anchor=E)  # Adjusted
+    main_plan_display_treeview.column("tp1", width=90, anchor=E)       # Adjusted
+    main_plan_display_treeview.column("tp2", width=90, anchor=E)       # Adjusted
+    main_plan_display_treeview.column("tp3", width=90, anchor=E)       # Adjusted
+    main_plan_display_treeview.column("status", width=80, anchor=CENTER)
+    main_plan_display_treeview.column("creation_date", width=120, anchor=CENTER) # Added
 
     main_plan_display_treeview.pack(fill=BOTH, expand=True, side=LEFT)
     
@@ -463,10 +475,10 @@ def open_manage_plans_window(parent_window):
     # We'll need a custom way to handle checkboxes in a treeview or use a list of checkbuttons if simpler
     # For now, let's set up the treeview structure. The actual selection mechanism will be decided.
     
-    cols = ("select", "stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status")
+    cols = ("select", "stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated
     tree_manage = ttk.Treeview(main_manage_frame, columns=cols, show="headings", height=15)
 
-    tree_manage.heading("select", text="Select") # For checkbox or selection indication
+    tree_manage.heading("select", text="Select") 
     tree_manage.heading("stock", text="Stock")
     tree_manage.heading("entry_price", text="Entry")
     tree_manage.heading("stop_loss", text="SL")
@@ -474,15 +486,17 @@ def open_manage_plans_window(parent_window):
     tree_manage.heading("tp2", text="TP2")
     tree_manage.heading("tp3", text="TP3")
     tree_manage.heading("status", text="Status")
+    tree_manage.heading("creation_date", text="Date Created") # Added
 
     tree_manage.column("select", width=50, anchor=CENTER, stretch=False)
     tree_manage.column("stock", width=80, anchor=W)
-    tree_manage.column("entry_price", width=100, anchor=E)
-    tree_manage.column("stop_loss", width=100, anchor=E)
-    tree_manage.column("tp1", width=100, anchor=E)
-    tree_manage.column("tp2", width=100, anchor=E)
-    tree_manage.column("tp3", width=100, anchor=E)
+    tree_manage.column("entry_price", width=90, anchor=E) # Adjusted
+    tree_manage.column("stop_loss", width=90, anchor=E)  # Adjusted
+    tree_manage.column("tp1", width=90, anchor=E)       # Adjusted
+    tree_manage.column("tp2", width=90, anchor=E)       # Adjusted
+    tree_manage.column("tp3", width=90, anchor=E)       # Adjusted
     tree_manage.column("status", width=80, anchor=CENTER)
+    tree_manage.column("creation_date", width=120, anchor=CENTER) # Added
 
     tree_manage.pack(fill=BOTH, expand=True, pady=5)
     
@@ -500,7 +514,7 @@ def open_manage_plans_window(parent_window):
 
         current_plans = load_plans_from_file()
         if not current_plans:
-            tree_manage.insert("", END, values=("", "No plans saved.", "", "", "", "", "", ""))
+            tree_manage.insert("", END, values=("", "No plans saved.", "", "", "", "", "", "", "")) # Adjusted
             return
 
         for i, plan_data in enumerate(current_plans):
@@ -511,11 +525,12 @@ def open_manage_plans_window(parent_window):
             tp2 = plan_data.get("tp2", "N/A")
             tp3 = plan_data.get("tp3", "N/A")
             status = plan_data.get("status", "Pending")
+            creation_date = plan_data.get("creation_date", "N/A") # Added
             
             # For selection, we'll use the treeview's built-in selection mechanism
             # and then retrieve selected items. Checkboxes in each row are complex.
             # Instead, we allow multi-selection in the treeview.
-            item_id = tree_manage.insert("", END, values=("", stock, entry, sl, tp1, tp2, tp3, status), tags=(stock,))
+            item_id = tree_manage.insert("", END, values=("", stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,)) # Adjusted
             # The first column is kept empty for now, could be used for a visual cue later if needed
 
     populate_manage_plans_tree()

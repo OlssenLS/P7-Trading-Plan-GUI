@@ -68,22 +68,23 @@ def display_plans_in_main_area_placeholder(plans, main_text_widget):
             # Optional: Insert a placeholder if no plans are being added, 
             # or rely on the Treeview being empty.
             # For now, let's assume an empty tree is fine, or main.py handles initial placeholder.
-            main_plan_treeview.insert("", END, values=("No plans to display.", "", "", "", "", "", "")) # Adjusted for new columns
+            main_plan_treeview.insert("", END, values=("No plans to display.", "", "", "", "", "", "", "")) # Adjusted for new columns
             print("autoGenerateTradingPlan.py: No plans to display in Treeview.")
             return
 
         for plan in plans:
             # Ensure the values correspond to the columns defined in main.py for main_plan_display_treeview
-            # Current columns in main.py: ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status")
+            # Current columns in main.py: ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date")
             stock_name = plan.get("stock", "N/A")
             entry = plan.get("entry_price", "N/A")
             sl = plan.get("stop_loss", "N/A")
             tp1_val = plan.get("tp1", "N/A")
-            tp2_val = plan.get("tp2", "N/A") # Added
-            tp3_val = plan.get("tp3", "N/A") # Added
-            status_val = plan.get("status", "Pending") # Example default status
+            tp2_val = plan.get("tp2", "N/A") 
+            tp3_val = plan.get("tp3", "N/A") 
+            status_val = plan.get("status", "Pending") 
+            creation_date_val = plan.get("creation_date", "N/A") # Added
             
-            main_plan_treeview.insert("", END, values=(stock_name, entry, sl, tp1_val, tp2_val, tp3_val, status_val))
+            main_plan_treeview.insert("", END, values=(stock_name, entry, sl, tp1_val, tp2_val, tp3_val, status_val, creation_date_val))
         
     else:
         print("Main Treeview widget not available for displaying saved plans.")
