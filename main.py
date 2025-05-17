@@ -32,6 +32,7 @@ STOCKS_FILE = os.path.join(SCRIPT_DIR, "stocks.txt")
 DETECTION_HISTORY_FILE = os.path.join(DATA_DIR, "detection_history.json")
 KEEP_5D_BREAK_DAYS = 3
 KEEP_1M_BREAK_DAYS = 5
+KEEP_2M_BREAK_DAYS = 6
 KEEP_3M_BREAK_DAYS = 7
 
 # Ensure data directory exists
@@ -270,6 +271,62 @@ def detect_break_high_price(options, result_text):
                             else:
                                 break_reasons.append("1 Month High (New Break)")
                     
+                    # Check for 2-month high price break
+                    if options["2_months"] and len(df) >= 44:  # ~44 trading days in 2 months
+                        # Get the latest break status
+                        break_2m = False
+                        
+                        # Check for new break - FIX: use last n periods rather than calendar days
+                        date_list = sorted(df["date"].unique())
+                        if len(date_list) >= 45:  # 44 days + current
+                            # Get dates excluding the latest date
+                            prev_dates = date_list[:-1]
+                            # Get the last 44 dates (approx 2 months of trading)
+                            last_44_dates = prev_dates[-44:]
+                            
+                            two_months_df = df[df["date"].isin(last_44_dates)]
+                            
+                            if not two_months_df.empty:
+                                two_months_high = two_months_df["high"].max()
+                                debug_message = f"  2-month high: {two_months_high:.2f}, Latest close: {latest_close:.2f}, Break: {latest_close > two_months_high}\n"
+                                result_text.insert(END, debug_message)
+                                result_text.see(END)
+                                
+                                if latest_close > two_months_high:
+                                    # Found a new break
+                                    break_2m = True
+                                    # Record the break date
+                                    break_types["2m_break_date"] = latest_date_str
+                            else:
+                                result_text.insert(END, f"  2-month data empty (unusual)\n")
+                                result_text.see(END)
+                        else:
+                            result_text.insert(END, f"  Not enough data points for 2-month analysis\n")
+                            result_text.see(END)
+                        
+                        # Check if there's a recent break that's still valid (within KEEP_2M_BREAK_DAYS)
+                        if not break_2m and stock in detection_history.get(current_date, {}):
+                            stock_history = detection_history[current_date].get(stock, {})
+                            if "2m_break_date" in stock_history:
+                                break_date = datetime.strptime(stock_history["2m_break_date"], "%Y-%m-%d")
+                                recent_dates = [d for d in available_dates if d <= latest_date]
+                                if len(recent_dates) >= 2:  # Need at least 2 dates to calculate days since break
+                                    # Find position of break date in available dates
+                                    if break_date in recent_dates:
+                                        break_idx = recent_dates.index(break_date)
+                                        days_since_break = len(recent_dates) - break_idx - 1
+                                        if days_since_break <= KEEP_2M_BREAK_DAYS:
+                                            break_2m = True
+                                            break_types["2m_break_date"] = stock_history["2m_break_date"]
+                                            break_types["2m_days_since"] = days_since_break
+                        
+                        if break_2m:
+                            broke_high = True
+                            if "2m_days_since" in break_types:
+                                break_reasons.append(f"2 Months High (Day {break_types['2m_days_since']} of {KEEP_2M_BREAK_DAYS})")
+                            else:
+                                break_reasons.append("2 Months High (New Break)")
+                    
                     # Check for 3-months high price break
                     if options["3_months"] and len(df) >= 66:  # ~66 trading days in 3 months
                         # Get the latest break status
@@ -382,12 +439,14 @@ def open_generator_window():
     options = {
         "5_days": ttk.BooleanVar(),
         "1_month": ttk.BooleanVar(),
+        "2_months": ttk.BooleanVar(),
         "3_months": ttk.BooleanVar()
     }
     
     # Checkboxes
     ttk.Checkbutton(options_frame, text="5 Days High Price", variable=options["5_days"]).pack(anchor=W, pady=5)
     ttk.Checkbutton(options_frame, text="1 Month High Price", variable=options["1_month"]).pack(anchor=W, pady=5)
+    ttk.Checkbutton(options_frame, text="2 Months High Price", variable=options["2_months"]).pack(anchor=W, pady=5)
     ttk.Checkbutton(options_frame, text="3 Months High Price", variable=options["3_months"]).pack(anchor=W, pady=5)
     
     # Button frame
