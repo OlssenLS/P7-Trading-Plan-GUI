@@ -6,13 +6,22 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import json
+from tkinter import simpledialog # For asking risk percentage
 
-# Get the script directory for file paths
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Import from the new module
+from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE
+from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder # Import new functions
+
+# Get the script directory for file paths - This SCRIPT_DIR is for main.py specific paths if any.
+# The breakHighPriceDetection module manages its own SCRIPT_DIR for its file operations.
+# SCRIPT_DIR_MAIN = os.path.dirname(os.path.abspath(__file__)) # Keep if main.py has other file needs
+
+# Define the path for saved trading plans
+SAVED_PLANS_FILE = os.path.join(DATA_DIR, "saved_trading_plans.json")
 
 root = ttk.Window(themename="darkly")
 root.title("Trading Plan Generator")
-root.geometry("800x600")
+root.geometry("800x1000")
 root.resizable(True, True)
 
 center_frame = ttk.Frame(root)
@@ -26,19 +35,14 @@ spinner = ttk.Progressbar(center_frame, orient=HORIZONTAL, length=300, mode="ind
 spinner.grid(column=0, row=0, padx=10, pady=10)
 spinner.start()
 
-# Constants for break tracking
-DATA_DIR = os.path.join(SCRIPT_DIR, "data")
-STOCKS_FILE = os.path.join(SCRIPT_DIR, "stocks.txt")
-DETECTION_HISTORY_FILE = os.path.join(DATA_DIR, "detection_history.json")
-KEEP_5D_BREAK_DAYS = 3
-KEEP_1M_BREAK_DAYS = 5
-KEEP_2M_BREAK_DAYS = 6
-KEEP_3M_BREAK_DAYS = 7
+# Constants for break tracking are now in breakHighPriceDetection.py
+# DATA_DIR, STOCKS_FILE are imported. DETECTION_HISTORY_FILE is managed by the module.
+# KEEP_..._DAYS constants are managed by the module.
 
-# Ensure data directory exists
+# Ensure data directory exists (using imported DATA_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Create default stocks.txt if it doesn't exist
+# Create default stocks.txt if it doesn't exist (using imported STOCKS_FILE)
 if not os.path.exists(STOCKS_FILE):
     default_stocks = [
         "BBCA", "BBRI", "BMRI", "TLKM", "ASII", 
@@ -47,425 +51,173 @@ if not os.path.exists(STOCKS_FILE):
     with open(STOCKS_FILE, "w") as f:
         f.write("\n".join(default_stocks))
 
-def get_stock_list():
-    """Read stock list from stocks.txt"""
-    stock_list = []
-    try:
-        with open(STOCKS_FILE, "r") as f:
-            stock_list = [line.strip() for line in f.readlines() if line.strip()]
-    except Exception as e:
-        print(f"Error reading stocks.txt: {e}")
-    return stock_list
+# Main Treeview for displaying saved plans
+main_plan_display_treeview = None # Will be assigned in show_main_page
 
-def load_detection_history():
-    """Load detection history from file if it exists"""
-    history = {}
+# --- Functions for loading and saving plans ---
+def load_plans_from_file():
+    """Loads trading plans from the JSON file."""
+    if not os.path.exists(SAVED_PLANS_FILE):
+        return []
     try:
-        if os.path.exists(DETECTION_HISTORY_FILE):
-            with open(DETECTION_HISTORY_FILE, "r") as f:
-                history = json.load(f)
-    except Exception as e:
-        print(f"Error loading detection history: {e}")
-    return history
+        with open(SAVED_PLANS_FILE, "r") as f:
+            plans = json.load(f)
+            # Ensure it's a list and handle empty file case gracefully
+            return plans if isinstance(plans, list) else []
+    except (IOError, json.JSONDecodeError) as e:
+        print(f"Error loading plans from {SAVED_PLANS_FILE}: {e}")
+        # Optionally inform user, but for now, just return empty list
+        # simpledialog.messagebox.showwarning("Load Error", f"Could not load plans: {e}\\nStarting with no saved plans.", parent=root)
+        # To prevent data loss on next save if file was corrupt, could rename/backup here
+        return []
 
-def save_detection_history(history):
-    """Save detection history to file"""
-    try:
-        with open(DETECTION_HISTORY_FILE, "w") as f:
-            json.dump(history, f)
-    except Exception as e:
-        print(f"Error saving detection history: {e}")
-
-def detect_break_high_price(options, result_text, continue_button_ref, output_list_for_plan):
-    """Detect break high price based on selected options and update continue button."""
-    base_url = "https://yfinance-web-indonesia-data.vercel.app"
-    stocks = get_stock_list()
+def save_plans_to_file(new_plans_to_add):
+    """Saves a list of new plans to the JSON file, updating existing or appending new."""
+    existing_plans_list = load_plans_from_file()
     
-    # Clear the output list and disable continue button at the start of detection
-    output_list_for_plan.clear()
-    if continue_button_ref.winfo_exists():
-        root.after(0, lambda: continue_button_ref.config(state=DISABLED))
+    # For easier update, convert list of plans to a dict keyed by stock
+    # Assuming each plan dictionary has a "stock" key
+    updated_plans_dict = {plan['stock']: plan for plan in existing_plans_list if 'stock' in plan} # Ensure stock key exists
     
-    # Check if at least one option is selected
-    if not any(options.values()):
-        result_text.insert(END, "Please select at least one period option.\n")
-        return
-    
-    # Clear result text
-    result_text.delete(1.0, END)
-    
-    result_text.insert(END, "Starting detection...\n")
-    result_text.see(END)
-    
-    # Debug total stocks
-    result_text.insert(END, f"Total stocks to check: {len(stocks)}\n")
-    result_text.see(END)
-    
-    # Load detection history
-    detection_history = load_detection_history()
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    
-    # Create new empty history for today if it doesn't exist
-    if current_date not in detection_history:
-        detection_history[current_date] = {}
+    for new_plan in new_plans_to_add:
+        if 'stock' in new_plan: # Ensure stock key exists in new plan
+            updated_plans_dict[new_plan['stock']] = new_plan # Add or update
         
-    # Clean up old dates (keep only last 10 days)
-    dates = sorted(list(detection_history.keys()))
-    if len(dates) > 10:
-        for old_date in dates[:-10]:
-            if old_date in detection_history:
-                del detection_history[old_date]
+    final_plans_list = list(updated_plans_dict.values())
     
-    detected_stocks = []
-    
-    # Process each stock
-    for stock in stocks:
+    try:
+        with open(SAVED_PLANS_FILE, "w") as f:
+            json.dump(final_plans_list, f, indent=4)
+        print(f"Plans saved to {SAVED_PLANS_FILE}")
+        return True
+    except IOError as e:
+        print(f"Error saving plans to {SAVED_PLANS_FILE}: {e}")
+        simpledialog.messagebox.showerror("Save Error", f"Could not save plans to file: {e}", parent=root)
+        return False
+
+def delete_all_saved_plans():
+    """Deletes all saved trading plans from the file and clears the display."""
+    global main_plan_display_treeview
+    if not os.path.exists(SAVED_PLANS_FILE):
+        simpledialog.messagebox.showinfo("No Plans", "There are no saved plans to delete.", parent=root)
+        return
+
+    confirm = simpledialog.messagebox.askyesno(
+        "Confirm Delete", 
+        "Are you sure you want to delete all saved trading plans? This action cannot be undone.",
+        parent=root
+    )
+    if confirm:
         try:
-            endpoint_url = f"{base_url}/api/stocks/{stock}?start_date=2023-01-01"
-            result_text.insert(END, f"Checking {stock}...\n")
-            result_text.see(END)
-            
-            response = requests.get(endpoint_url)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, dict) and "historical_data" in data and len(data["historical_data"]) > 0:
-                    result_text.insert(END, f"  Got data for {stock} ({len(data['historical_data'])} records)\n")
-                    result_text.see(END)
-                    
-                    df = pd.DataFrame(data["historical_data"])
-                    
-                    # Convert date to datetime
-                    df["date"] = pd.to_datetime(df["date"])
-                    
-                    # Sort by date
-                    df = df.sort_values("date")
-                    
-                    # Get latest close price and date
-                    latest_close = df.iloc[-1]["close"]
-                    latest_date = df.iloc[-1]["date"]
-                    latest_date_str = latest_date.strftime("%Y-%m-%d")
-                    
-                    # Debug message for each stock
-                    debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
-                    result_text.insert(END, debug_message)
-                    result_text.see(END)
-                    
-                    # Get dates for checking recent breaks
-                    available_dates = sorted(df["date"].unique())
-                    
-                    # Track if this stock broke high in any period
-                    broke_high = False
-                    break_reasons = []
-                    break_types = {}
-                    high_prices = {}
-                    
-                    # Debug values for high prices
-                    five_days_high = None
-                    one_month_high = None
-                    three_months_high = None
-                    
-                    # Check for 5-day high price break
-                    if options["5_days"] and len(df) >= 6:
-                        # Get the latest break status
-                        break_5d = False
-                        
-                        # Use last n periods rather than calendar days
-                        date_list = sorted(df["date"].unique())
-                        if len(date_list) >= 6:
-                            # Get dates excluding the latest date
-                            prev_dates = date_list[:-1]
-                            # Get the last 5 dates
-                            last_5_dates = prev_dates[-5:]
-                            
-                            five_days_df = df[df["date"].isin(last_5_dates)]
-                            
-                            if not five_days_df.empty:
-                                five_days_high = five_days_df["high"].max()
-                                debug_message = f"  5-day high: {five_days_high:.2f}, Latest close: {latest_close:.2f}, Break: {latest_close > five_days_high}\n"
-                                result_text.insert(END, debug_message)
-                                result_text.see(END)
-                                
-                                if latest_close > five_days_high:
-                                    # Found a new break
-                                    break_5d = True
-                                    # Record the break date and high price
-                                    break_types["5d_break_date"] = latest_date_str
-                                    high_prices["5d"] = five_days_high
-                            else:
-                                result_text.insert(END, f"  5-day data empty (unusual)\n")
-                                result_text.see(END)
-                        else:
-                            result_text.insert(END, f"  Not enough data points for 5-day analysis\n")
-                            result_text.see(END)
-                        
-                        # Check if there's a recent break that's still valid (within KEEP_5D_BREAK_DAYS)
-                        if not break_5d and stock in detection_history.get(current_date, {}):
-                            stock_history = detection_history[current_date].get(stock, {})
-                            if "5d_break_date" in stock_history:
-                                break_date = datetime.strptime(stock_history["5d_break_date"], "%Y-%m-%d")
-                                recent_dates = [d for d in available_dates if d <= latest_date]
-                                if len(recent_dates) >= 2:  # Need at least 2 dates to calculate days since break
-                                    # Find position of break date in available dates
-                                    if break_date in recent_dates:
-                                        break_idx = recent_dates.index(break_date)
-                                        days_since_break = len(recent_dates) - break_idx - 1
-                                        if days_since_break <= KEEP_5D_BREAK_DAYS:
-                                            break_5d = True
-                                            break_types["5d_break_date"] = stock_history["5d_break_date"]
-                                            break_types["5d_days_since"] = days_since_break
-                        
-                        if break_5d:
-                            broke_high = True
-                            if "5d_days_since" in break_types:
-                                break_reasons.append(f"5 Days High (Day {break_types['5d_days_since']} of {KEEP_5D_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("5 Days High (New Break)")
-                    
-                    # Check for 1-month high price break
-                    if options["1_month"] and len(df) >= 22:  # ~22 trading days in a month
-                        # Get the latest break status
-                        break_1m = False
-                        
-                        # Check for new break - FIX: use last n periods rather than calendar days
-                        date_list = sorted(df["date"].unique())
-                        if len(date_list) >= 23:  # 22 days + current
-                            # Get dates excluding the latest date
-                            prev_dates = date_list[:-1]
-                            # Get the last 22 dates (approx 1 month of trading)
-                            last_22_dates = prev_dates[-22:]
-                            
-                            one_month_df = df[df["date"].isin(last_22_dates)]
-                            
-                            if not one_month_df.empty:
-                                one_month_high = one_month_df["high"].max()
-                                debug_message = f"  1-month high: {one_month_high:.2f}, Latest close: {latest_close:.2f}, Break: {latest_close > one_month_high}\n"
-                                result_text.insert(END, debug_message)
-                                result_text.see(END)
-                                
-                                if latest_close > one_month_high:
-                                    # Found a new break
-                                    break_1m = True
-                                    # Record the break date and high price
-                                    break_types["1m_break_date"] = latest_date_str
-                                    high_prices["1m"] = one_month_high
-                            else:
-                                result_text.insert(END, f"  1-month data empty (unusual)\n")
-                                result_text.see(END)
-                        else:
-                            result_text.insert(END, f"  Not enough data points for 1-month analysis\n")
-                            result_text.see(END)
-                        
-                        # Check if there's a recent break that's still valid (within KEEP_1M_BREAK_DAYS)
-                        if not break_1m and stock in detection_history.get(current_date, {}):
-                            stock_history = detection_history[current_date].get(stock, {})
-                            if "1m_break_date" in stock_history:
-                                break_date = datetime.strptime(stock_history["1m_break_date"], "%Y-%m-%d")
-                                recent_dates = [d for d in available_dates if d <= latest_date]
-                                if len(recent_dates) >= 2:  # Need at least 2 dates to calculate days since break
-                                    # Find position of break date in available dates
-                                    if break_date in recent_dates:
-                                        break_idx = recent_dates.index(break_date)
-                                        days_since_break = len(recent_dates) - break_idx - 1
-                                        if days_since_break <= KEEP_1M_BREAK_DAYS:
-                                            break_1m = True
-                                            break_types["1m_break_date"] = stock_history["1m_break_date"]
-                                            break_types["1m_days_since"] = days_since_break
-                        
-                        if break_1m:
-                            broke_high = True
-                            if "1m_days_since" in break_types:
-                                break_reasons.append(f"1 Month High (Day {break_types['1m_days_since']} of {KEEP_1M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("1 Month High (New Break)")
-                    
-                    # Check for 2-month high price break
-                    if options["2_months"] and len(df) >= 44:  # ~44 trading days in 2 months
-                        # Get the latest break status
-                        break_2m = False
-                        
-                        # Check for new break - FIX: use last n periods rather than calendar days
-                        date_list = sorted(df["date"].unique())
-                        if len(date_list) >= 45:  # 44 days + current
-                            # Get dates excluding the latest date
-                            prev_dates = date_list[:-1]
-                            # Get the last 44 dates (approx 2 months of trading)
-                            last_44_dates = prev_dates[-44:]
-                            
-                            two_months_df = df[df["date"].isin(last_44_dates)]
-                            
-                            if not two_months_df.empty:
-                                two_months_high = two_months_df["high"].max()
-                                debug_message = f"  2-month high: {two_months_high:.2f}, Latest close: {latest_close:.2f}, Break: {latest_close > two_months_high}\n"
-                                result_text.insert(END, debug_message)
-                                result_text.see(END)
-                                
-                                if latest_close > two_months_high:
-                                    # Found a new break
-                                    break_2m = True
-                                    # Record the break date and high price
-                                    break_types["2m_break_date"] = latest_date_str
-                                    high_prices["2m"] = two_months_high
-                            else:
-                                result_text.insert(END, f"  2-month data empty (unusual)\n")
-                                result_text.see(END)
-                        else:
-                            result_text.insert(END, f"  Not enough data points for 2-month analysis\n")
-                            result_text.see(END)
-                        
-                        # Check if there's a recent break that's still valid (within KEEP_2M_BREAK_DAYS)
-                        if not break_2m and stock in detection_history.get(current_date, {}):
-                            stock_history = detection_history[current_date].get(stock, {})
-                            if "2m_break_date" in stock_history:
-                                break_date = datetime.strptime(stock_history["2m_break_date"], "%Y-%m-%d")
-                                recent_dates = [d for d in available_dates if d <= latest_date]
-                                if len(recent_dates) >= 2:  # Need at least 2 dates to calculate days since break
-                                    # Find position of break date in available dates
-                                    if break_date in recent_dates:
-                                        break_idx = recent_dates.index(break_date)
-                                        days_since_break = len(recent_dates) - break_idx - 1
-                                        if days_since_break <= KEEP_2M_BREAK_DAYS:
-                                            break_2m = True
-                                            break_types["2m_break_date"] = stock_history["2m_break_date"]
-                                            break_types["2m_days_since"] = days_since_break
-                        
-                        if break_2m:
-                            broke_high = True
-                            if "2m_days_since" in break_types:
-                                break_reasons.append(f"2 Months High (Day {break_types['2m_days_since']} of {KEEP_2M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("2 Months High (New Break)")
-                    
-                    # Check for 3-months high price break
-                    if options["3_months"] and len(df) >= 66:  # ~66 trading days in 3 months
-                        # Get the latest break status
-                        break_3m = False
-                        
-                        # Check for new break - FIX: use last n periods rather than calendar days
-                        date_list = sorted(df["date"].unique())
-                        if len(date_list) >= 67:  # 66 days + current
-                            # Get dates excluding the latest date
-                            prev_dates = date_list[:-1]
-                            # Get the last 66 dates (approx 3 months of trading)
-                            last_66_dates = prev_dates[-66:]
-                            
-                            three_months_df = df[df["date"].isin(last_66_dates)]
-                            
-                            if not three_months_df.empty:
-                                three_months_high = three_months_df["high"].max()
-                                debug_message = f"  3-month high: {three_months_high:.2f}, Latest close: {latest_close:.2f}, Break: {latest_close > three_months_high}\n"
-                                result_text.insert(END, debug_message)
-                                result_text.see(END)
-                                
-                                if latest_close > three_months_high:
-                                    # Found a new break
-                                    break_3m = True
-                                    # Record the break date and high price
-                                    break_types["3m_break_date"] = latest_date_str
-                                    high_prices["3m"] = three_months_high
-                            else:
-                                result_text.insert(END, f"  3-month data empty (unusual)\n")
-                                result_text.see(END)
-                        else:
-                            result_text.insert(END, f"  Not enough data points for 3-month analysis\n")
-                            result_text.see(END)
-                        
-                        # Check if there's a recent break that's still valid (within KEEP_3M_BREAK_DAYS)
-                        if not break_3m and stock in detection_history.get(current_date, {}):
-                            stock_history = detection_history[current_date].get(stock, {})
-                            if "3m_break_date" in stock_history:
-                                break_date = datetime.strptime(stock_history["3m_break_date"], "%Y-%m-%d")
-                                recent_dates = [d for d in available_dates if d <= latest_date]
-                                if len(recent_dates) >= 2:  # Need at least 2 dates to calculate days since break
-                                    # Find position of break date in available dates
-                                    if break_date in recent_dates:
-                                        break_idx = recent_dates.index(break_date)
-                                        days_since_break = len(recent_dates) - break_idx - 1
-                                        if days_since_break <= KEEP_3M_BREAK_DAYS:
-                                            break_3m = True
-                                            break_types["3m_break_date"] = stock_history["3m_break_date"]
-                                            break_types["3m_days_since"] = days_since_break
-                        
-                        if break_3m:
-                            broke_high = True
-                            if "3m_days_since" in break_types:
-                                break_reasons.append(f"3 Months High (Day {break_types['3m_days_since']} of {KEEP_3M_BREAK_DAYS})")
-                            else:
-                                break_reasons.append("3 Months High (New Break)")
-                    
-                    # Save breaks to history
-                    if broke_high:
-                        detected_stocks.append((stock, break_reasons, latest_close, high_prices))
-                        if stock not in detection_history[current_date]:
-                            detection_history[current_date][stock] = {}
-                        
-                        # Update break dates in history
-                        for key, value in break_types.items():
-                            detection_history[current_date][stock][key] = value
-                else:
-                    result_text.insert(END, f"  No data available for {stock}\n")
-                    result_text.see(END)
-            else:
-                result_text.insert(END, f"  API error for {stock}: {response.status_code}\n")
-                result_text.see(END)
-            
-            # Update UI periodically
-            result_text.update()
-            
-        except Exception as e:
-            result_text.insert(END, f"Error processing {stock}: {str(e)}\n")
-            result_text.see(END)
-    
-    # Save updated detection history
-    save_detection_history(detection_history)
-    
-    # Populate the shared list for the trading plan window
-    output_list_for_plan.extend(detected_stocks)
-
-    # Clear the result text and only show the detected stocks
-    result_text.delete(1.0, END)
-    
-    # Show detected stocks
-    if detected_stocks:
-        result_text.insert(END, "Detected stocks breaking high price:\n\n")
-        for stock, reasons, close, highs in detected_stocks:
-            result_text.insert(END, f"{stock}: {', '.join(reasons)} - Close: {close:.2f}\n")
-            # Add high price information for each break type
-            for reason in reasons:
-                if "5 Days" in reason and "5d" in highs:
-                    result_text.insert(END, f"    5 Days High: {highs['5d']:.2f}\n")
-                if "1 Month" in reason and "1m" in highs:
-                    result_text.insert(END, f"    1 Month High: {highs['1m']:.2f}\n")
-                if "2 Months" in reason and "2m" in highs:
-                    result_text.insert(END, f"    2 Months High: {highs['2m']:.2f}\n")
-                if "3 Months" in reason and "3m" in highs:
-                    result_text.insert(END, f"    3 Months High: {highs['3m']:.2f}\n")
-            result_text.insert(END, "\n")
+            os.remove(SAVED_PLANS_FILE)
+            simpledialog.messagebox.showinfo("Success", "All saved trading plans have been deleted.", parent=root)
+            # Refresh the display by showing an empty list
+            if main_plan_display_treeview:
+                display_plans_in_main_area_placeholder([], main_plan_display_treeview)
+        except OSError as e:
+            simpledialog.messagebox.showerror("Error", f"Could not delete saved plans file: {e}", parent=root)
     else:
-        result_text.insert(END, "No stocks breaking high price detected.\n")
-    
-    # Show summary
-    result_text.insert(END, f"\nDetection complete. Found {len(detected_stocks)} stocks breaking high price.\n")
-    result_text.see(END)
+        simpledialog.messagebox.showinfo("Cancelled", "Delete operation cancelled.", parent=root)
 
-    # Update continue button state based on whether stocks were detected
-    if detected_stocks: # Check the local list populated in this run
-        if continue_button_ref.winfo_exists():
-            root.after(0, lambda: continue_button_ref.config(state=NORMAL))
-    # No explicit else to disable, as it's disabled at the start and only enabled if stocks are found.
-    # However, to be absolutely sure if the logic flow changes, an explicit disable could be here:
-    # else:
-    #     if continue_button_ref.winfo_exists():
-    #         root.after(0, lambda: continue_button_ref.config(state=DISABLED))
+def show_generated_plans_window(parent_window, generated_plans, original_plan_window):
+    """Open a new window to display generated trading plans and offer save/discard options."""
+    if not generated_plans:
+        simpledialog.messagebox.showinfo("No Plans", "No trading plans were generated.", parent=parent_window)
+        return
+
+    gen_plans_window = ttk.Toplevel(parent_window)
+    gen_plans_window.title("Generated Trading Plans")
+    gen_plans_window.geometry("700x500") # Adjusted size for better table display
+    gen_plans_window.transient(parent_window)
+    gen_plans_window.grab_set() # Make it modal
+
+    # Main frame for the generated plans window
+    main_gen_frame = ttk.Frame(gen_plans_window, padding=10)
+    main_gen_frame.pack(fill=BOTH, expand=True)
+
+    ttk.Label(main_gen_frame, text="Generated Trading Plans:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
+
+    # Use a Treeview for a tabular display
+    columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "rr_tp1")
+    tree = ttk.Treeview(main_gen_frame, columns=columns, show="headings", height=10)
+    
+    # Define headings
+    tree.heading("stock", text="Stock")
+    tree.heading("entry_price", text="Entry Price")
+    tree.heading("stop_loss", text="Stop Loss")
+    tree.heading("tp1", text="TP1")
+    tree.heading("tp2", text="TP2")
+    tree.heading("tp3", text="TP3")
+    tree.heading("rr_tp1", text="RR (TP1)")
+
+    # Adjust column widths
+    tree.column("stock", width=80, anchor=CENTER)
+    tree.column("entry_price", width=100, anchor=E)
+    tree.column("stop_loss", width=100, anchor=E)
+    tree.column("tp1", width=100, anchor=E)
+    tree.column("tp2", width=100, anchor=E)
+    tree.column("tp3", width=100, anchor=E)
+    tree.column("rr_tp1", width=80, anchor=CENTER)
+
+    # Insert data
+    for plan in generated_plans:
+        tree.insert("", END, values=([plan.get(col, "N/A") for col in columns]))
+
+    tree.pack(fill=BOTH, expand=True, pady=5)
+
+    # Add a scrollbar for the treeview
+    scrollbar_tree = ttk.Scrollbar(main_gen_frame, orient=VERTICAL, command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar_tree.set)
+    # tree.pack(side=LEFT, fill=BOTH, expand=True) # Already packed above
+    # scrollbar_tree.pack(side=RIGHT, fill=Y) # Pack it next to the tree if needed, but tree.pack with expand usually handles this
+
+    # Button frame
+    button_gen_frame = ttk.Frame(main_gen_frame)
+    button_gen_frame.pack(fill=X, pady=(10, 0))
+
+    def discard_action():
+        gen_plans_window.destroy()
+
+    def save_action():
+        global main_plan_display_treeview # Use the new global variable name
+        print("Saving generated plans...") 
+        
+        if save_plans_to_file(generated_plans): # Call the new save function
+            simpledialog.messagebox.showinfo("Plans Saved", "Trading plans have been successfully saved.", parent=gen_plans_window)
+            # Refresh the main page display by loading all plans (including newly saved)
+            if main_plan_display_treeview:
+                all_saved_plans = load_plans_from_file() 
+                display_plans_in_main_area_placeholder(all_saved_plans, main_plan_display_treeview)
+            else:
+                print("main_plan_display_treeview not initialized. Cannot refresh display.")
+        # else: # Error message is now shown by save_plans_to_file
+            # simpledialog.messagebox.showwarning("Save Error", "Could not save plans to file.", parent=gen_plans_window)
+            
+        gen_plans_window.destroy()
+        # Close the original plan_window as well (already handled below)
+
+    discard_button = ttk.Button(button_gen_frame, text="Discard Plans", command=discard_action, bootstyle="danger")
+    discard_button.pack(side=LEFT, padx=5)
+
+    save_button = ttk.Button(button_gen_frame, text="Save & Display Plans", command=save_action, bootstyle="success")
+    save_button.pack(side=RIGHT, padx=5)
+
+    # Close the original plan_window after this new window is set up
+    if original_plan_window and original_plan_window.winfo_exists():
+        original_plan_window.destroy()
 
 def open_trading_plan_window(parent_window, detected_stocks_data):
     """Open a new window to select stocks for trading plan generation."""
     plan_window = ttk.Toplevel(parent_window)
     plan_window.title("Generate Trading Plan")
     plan_window.geometry("400x500")
+    plan_window.transient(parent_window) # Make it appear on top of its parent
+    plan_window.grab_set() # Make it modal
 
     if not detected_stocks_data:
         ttk.Label(plan_window, text="No stocks detected or detection not run yet.", padding=20).pack()
+        # Add a button to close this window if no stocks
+        ttk.Button(plan_window, text="Close", command=plan_window.destroy).pack(pady=10)
         return
 
     main_frame = ttk.Frame(plan_window, padding=10)
@@ -481,8 +233,9 @@ def open_trading_plan_window(parent_window, detected_stocks_data):
     for stock_info in detected_stocks_data:
         stock_name = stock_info[0]
         var = ttk.BooleanVar(value=False)
+        # Task 1: Add a little spacing (pady) between checkboxes
         chk = ttk.Checkbutton(stocks_frame, text=stock_name, variable=var)
-        chk.pack(anchor=W)
+        chk.pack(anchor=W, pady=2) # Added pady=2 for spacing
         selected_stocks_vars[stock_name] = var
 
     button_frame = ttk.Frame(main_frame)
@@ -500,26 +253,26 @@ def open_trading_plan_window(parent_window, detected_stocks_data):
     for var in selected_stocks_vars.values():
         var.trace_add("write", update_generate_button_state)
     
-    # Initial check
-    update_generate_button_state()
+    update_generate_button_state() # Initial check
 
     def generate_plan_for_selected_action():
-        selected_names = [name for name, var in selected_stocks_vars.items() if var.get()]
-        # Placeholder for actual plan generation
-        print(f"Placeholder: Generating trading plan for: {', '.join(selected_names)}")
-        # You would typically pass selected_names and potentially relevant data from detected_stocks_data
-        # to another function or display results in a new dialog/text area.
+        # Task 2: After the Generate Plan button is clicked...
+        selected_stock_details = []
+        for stock_data_item in detected_stocks_data: # detected_stocks_data is the full list
+            stock_name = stock_data_item[0]
+            if selected_stocks_vars.get(stock_name) and selected_stocks_vars[stock_name].get():
+                selected_stock_details.append(stock_data_item)
         
-        # For now, just show a simple message in the window
-        existing_labels = [widget for widget in main_frame.winfo_children() if isinstance(widget, ttk.Label) and "Generating plan for" in widget.cget("text")]
-        for label in existing_labels:
-            label.destroy()
-        
-        if selected_names:
-            ttk.Label(main_frame, text=f"Generating plan for: {', '.join(selected_names)}").pack(pady=10)
-        else:
-            ttk.Label(main_frame, text="No stocks selected.").pack(pady=10)
+        if not selected_stock_details:
+            simpledialog.messagebox.showwarning("No Selection", "Please select at least one stock to generate a plan.", parent=plan_window)
+            return
 
+        # Call the placeholder algorithm
+        generated_plans = generate_plans_for_stocks(selected_stock_details)
+        
+        # Open the new window showing generated plans
+        # The original plan_window will be closed by show_generated_plans_window
+        show_generated_plans_window(plan_window.master, generated_plans, plan_window) 
 
     generate_plan_button.config(command=generate_plan_for_selected_action)
 
@@ -576,8 +329,29 @@ def open_generator_window():
         state=DISABLED, # Start disabled
         command=lambda: open_trading_plan_window(generator_window, shared_detected_stocks_list)
     )
-    # Pack order matters: Run Detection then Continue
-    # run_button is defined and packed next
+    
+    # Callback implementations for detect_break_high_price
+    def progress_callback_impl(message):
+        if result_text.winfo_exists(): # Check if widget still exists
+            root.after(0, lambda: (
+                result_text.insert(END, message), 
+                result_text.see(END) 
+                # result_text.update() # update() can be slow, see(END) is often enough
+            ))
+
+    def completion_callback_impl(detected_stocks_summary_data, summary_text, final_status):
+        if result_text.winfo_exists():
+            root.after(0, lambda: (
+                result_text.delete(1.0, END),
+                result_text.insert(END, summary_text),
+                result_text.insert(END, final_status),
+                result_text.see(END)
+            ))
+
+    def set_continue_button_state_impl(enable):
+        if continue_button.winfo_exists():
+            root.after(0, lambda: continue_button.config(state=NORMAL if enable else DISABLED))
+
 
     # Run button
     run_button = ttk.Button(
@@ -585,12 +359,13 @@ def open_generator_window():
         text="Run Detection", 
         bootstyle="success",
         command=lambda: threading.Thread(
-            target=detect_break_high_price, # Will be modified to accept new args
+            target=detect_break_high_price, # Use imported function
             args=(
                 {k: v.get() for k, v in options.items()},
-                result_text,
-                continue_button,  # Pass the button reference
-                shared_detected_stocks_list # Pass the list to be populated
+                shared_detected_stocks_list, # Pass the list to be populated
+                progress_callback_impl,      # Pass the callback
+                completion_callback_impl,    # Pass the callback
+                set_continue_button_state_impl # Pass the callback
             ),
             daemon=True
         ).start()
@@ -599,6 +374,7 @@ def open_generator_window():
     continue_button.pack(side=LEFT, padx=5) # Packed after run_button
 
 def show_main_page():
+    global main_plan_display_treeview # Declare global to assign
     # Remove API check elements
     for widget in center_frame.winfo_children():
         widget.destroy()
@@ -621,7 +397,196 @@ def show_main_page():
     
     # Create button
     create_button = ttk.Button(header_frame, text="Create", bootstyle="primary", command=open_generator_window)
-    create_button.pack(side=RIGHT)
+    create_button.pack(side=RIGHT, padx=(5,0)) # Add some padding if it's not the last one
+
+    # Manage Plans button
+    manage_plans_button = ttk.Button(header_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root)) # Added
+    manage_plans_button.pack(side=RIGHT, padx=(5,5)) # Added
+
+    # Delete All Plans button - positioned to the left of Create
+    delete_plans_button = ttk.Button(header_frame, text="Delete All Plans", bootstyle="danger", command=delete_all_saved_plans)
+    delete_plans_button.pack(side=RIGHT, padx=(0, 5)) # padx to add space between Delete and Create
+
+    # Placeholder for displaying saved trading plans on the main page
+    # This could be a more sophisticated widget or part of a dashboard later
+    main_page_display_frame = ttk.Frame(main_frame, padding=(0, 10))
+    main_page_display_frame.pack(fill=BOTH, expand=True)
+
+    ttk.Label(main_page_display_frame, text="Saved Trading Plans:", font=("Helvetica", 10, "italic")).pack(anchor=W, pady=(5,5))
+    
+    # Define columns for the main display Treeview
+    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status") # Updated columns
+    main_plan_display_treeview = ttk.Treeview(main_page_display_frame, columns=plan_columns, show="headings", height=10)
+    
+    # Define headings for the Treeview
+    main_plan_display_treeview.heading("stock", text="Stock")
+    main_plan_display_treeview.heading("entry_price", text="Entry")
+    main_plan_display_treeview.heading("stop_loss", text="Stop Loss")
+    main_plan_display_treeview.heading("tp1", text="TP1")
+    main_plan_display_treeview.heading("tp2", text="TP2") # Added
+    main_plan_display_treeview.heading("tp3", text="TP3") # Added
+    main_plan_display_treeview.heading("status", text="Status")
+
+    # Adjust column widths for the Treeview
+    main_plan_display_treeview.column("stock", width=80, anchor=CENTER)
+    main_plan_display_treeview.column("entry_price", width=100, anchor=E)
+    main_plan_display_treeview.column("stop_loss", width=100, anchor=E)
+    main_plan_display_treeview.column("tp1", width=100, anchor=E)
+    main_plan_display_treeview.column("tp2", width=100, anchor=E) # Added
+    main_plan_display_treeview.column("tp3", width=100, anchor=E) # Added
+    main_plan_display_treeview.column("status", width=80, anchor=CENTER) # Adjusted width
+
+    main_plan_display_treeview.pack(fill=BOTH, expand=True, side=LEFT)
+    
+    scrollbar_main_display = ttk.Scrollbar(main_page_display_frame, command=main_plan_display_treeview.yview)
+    scrollbar_main_display.pack(fill=Y, side=RIGHT)
+    main_plan_display_treeview.config(yscrollcommand=scrollbar_main_display.set)
+
+    # Load and display existing plans from file
+    loaded_plans = load_plans_from_file()
+    display_plans_in_main_area_placeholder(loaded_plans, main_plan_display_treeview)
+
+# --- Manage Plans Window ---
+def open_manage_plans_window(parent_window):
+    manage_window = ttk.Toplevel(parent_window)
+    manage_window.title("Manage Saved Trading Plans")
+    manage_window.geometry("800x500") # Adjusted for more columns
+    manage_window.transient(parent_window)
+    manage_window.grab_set()
+
+    main_manage_frame = ttk.Frame(manage_window, padding=10)
+    main_manage_frame.pack(fill=BOTH, expand=True)
+
+    ttk.Label(main_manage_frame, text="Select plans to delete:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
+
+    # Treeview for displaying plans with checkboxes
+    # We'll need a custom way to handle checkboxes in a treeview or use a list of checkbuttons if simpler
+    # For now, let's set up the treeview structure. The actual selection mechanism will be decided.
+    
+    cols = ("select", "stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status")
+    tree_manage = ttk.Treeview(main_manage_frame, columns=cols, show="headings", height=15)
+
+    tree_manage.heading("select", text="Select") # For checkbox or selection indication
+    tree_manage.heading("stock", text="Stock")
+    tree_manage.heading("entry_price", text="Entry")
+    tree_manage.heading("stop_loss", text="SL")
+    tree_manage.heading("tp1", text="TP1")
+    tree_manage.heading("tp2", text="TP2")
+    tree_manage.heading("tp3", text="TP3")
+    tree_manage.heading("status", text="Status")
+
+    tree_manage.column("select", width=50, anchor=CENTER, stretch=False)
+    tree_manage.column("stock", width=80, anchor=W)
+    tree_manage.column("entry_price", width=100, anchor=E)
+    tree_manage.column("stop_loss", width=100, anchor=E)
+    tree_manage.column("tp1", width=100, anchor=E)
+    tree_manage.column("tp2", width=100, anchor=E)
+    tree_manage.column("tp3", width=100, anchor=E)
+    tree_manage.column("status", width=80, anchor=CENTER)
+
+    tree_manage.pack(fill=BOTH, expand=True, pady=5)
+    
+    scrollbar_manage_tree = ttk.Scrollbar(main_manage_frame, orient=VERTICAL, command=tree_manage.yview)
+    tree_manage.configure(yscrollcommand=scrollbar_manage_tree.set)
+    scrollbar_manage_tree.pack(side=RIGHT, fill=Y, before=tree_manage) # Pack before tree to avoid overlap if not careful
+
+    selected_plans_vars = {} # To store BooleanVars for checkboxes, keyed by item ID or stock name
+
+    def populate_manage_plans_tree():
+        # Clear existing items
+        for item in tree_manage.get_children():
+            tree_manage.delete(item)
+        selected_plans_vars.clear()
+
+        current_plans = load_plans_from_file()
+        if not current_plans:
+            tree_manage.insert("", END, values=("", "No plans saved.", "", "", "", "", "", ""))
+            return
+
+        for i, plan_data in enumerate(current_plans):
+            stock = plan_data.get("stock", "N/A")
+            entry = plan_data.get("entry_price", "N/A")
+            sl = plan_data.get("stop_loss", "N/A")
+            tp1 = plan_data.get("tp1", "N/A")
+            tp2 = plan_data.get("tp2", "N/A")
+            tp3 = plan_data.get("tp3", "N/A")
+            status = plan_data.get("status", "Pending")
+            
+            # For selection, we'll use the treeview's built-in selection mechanism
+            # and then retrieve selected items. Checkboxes in each row are complex.
+            # Instead, we allow multi-selection in the treeview.
+            item_id = tree_manage.insert("", END, values=("", stock, entry, sl, tp1, tp2, tp3, status), tags=(stock,))
+            # The first column is kept empty for now, could be used for a visual cue later if needed
+
+    populate_manage_plans_tree()
+    tree_manage.config(selectmode="extended") # Allow multiple selections
+
+    # Button frame
+    button_manage_frame = ttk.Frame(main_manage_frame)
+    button_manage_frame.pack(fill=X, pady=(10, 0))
+
+    def delete_selected_action():
+        selected_item_ids = tree_manage.selection() # Get selected item IDs
+        if not selected_item_ids:
+            simpledialog.messagebox.showwarning("No Selection", "Please select at least one plan to delete.", parent=manage_window)
+            return
+
+        stocks_to_delete = set()
+        for item_id in selected_item_ids:
+            # Retrieve the stock name from the item's values or tags
+            # Assuming stock name is unique and stored as a tag or in a specific column
+            item_values = tree_manage.item(item_id, "values")
+            if item_values and len(item_values) > 1:
+                 # Assuming stock is the second column (index 1) after the placeholder 'select'
+                stock_name = item_values[1]
+                if stock_name != "No plans saved.": # Ensure it's a valid stock
+                    stocks_to_delete.add(stock_name)
+            
+        if not stocks_to_delete:
+            simpledialog.messagebox.showerror("Error", "Could not identify stocks to delete from selection.", parent=manage_window)
+            return
+
+        confirm = simpledialog.messagebox.askyesno(
+            "Confirm Delete",
+            f"Are you sure you want to delete {len(stocks_to_delete)} selected plan(s)? This action cannot be undone.",
+            parent=manage_window
+        )
+
+        if confirm:
+            current_plans = load_plans_from_file()
+            plans_to_keep = [plan for plan in current_plans if plan.get("stock") not in stocks_to_delete]
+            
+            # Attempt to save the filtered list
+            # We re-use save_plans_to_file by passing the complete list of plans to keep.
+            # This function internally converts to dict by stock and then back to list, effectively overwriting.
+            
+            # To truly overwrite with a potentially smaller list using the current save_plans_to_file,
+            # we must ensure it writes the provided list directly, not merge.
+            # Let's adjust save_plans_to_file to handle this, or make a specific "overwrite" save.
+            # For now, let's assume save_plans_to_file needs to be more flexible or we need a new one.
+            # Let's create a more direct save for this purpose to avoid complexity with the existing one.
+            
+            try:
+                with open(SAVED_PLANS_FILE, "w") as f:
+                    json.dump(plans_to_keep, f, indent=4)
+                simpledialog.messagebox.showinfo("Success", f"{len(stocks_to_delete)} plan(s) deleted successfully.", parent=manage_window)
+                
+                # Refresh displays
+                populate_manage_plans_tree() # Refresh this window's tree
+                if main_plan_display_treeview: # Refresh main window's tree
+                    display_plans_in_main_area_placeholder(plans_to_keep, main_plan_display_treeview)
+            
+            except IOError as e:
+                simpledialog.messagebox.showerror("Save Error", f"Could not update plans file: {e}", parent=manage_window)
+        else:
+            simpledialog.messagebox.showinfo("Cancelled", "Delete operation cancelled.", parent=manage_window)
+
+
+    close_button = ttk.Button(button_manage_frame, text="Close", command=manage_window.destroy, bootstyle="secondary")
+    close_button.pack(side=LEFT, padx=5)
+
+    delete_selected_button = ttk.Button(button_manage_frame, text="Delete Selected", command=delete_selected_action, bootstyle="danger")
+    delete_selected_button.pack(side=RIGHT, padx=5)
 
 def check_api_availability(max_retries=10):
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
