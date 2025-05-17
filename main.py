@@ -76,10 +76,15 @@ def save_detection_history(history):
     except Exception as e:
         print(f"Error saving detection history: {e}")
 
-def detect_break_high_price(options, result_text):
-    """Detect break high price based on selected options"""
+def detect_break_high_price(options, result_text, continue_button_ref, output_list_for_plan):
+    """Detect break high price based on selected options and update continue button."""
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     stocks = get_stock_list()
+    
+    # Clear the output list and disable continue button at the start of detection
+    output_list_for_plan.clear()
+    if continue_button_ref.winfo_exists():
+        root.after(0, lambda: continue_button_ref.config(state=DISABLED))
     
     # Check if at least one option is selected
     if not any(options.values()):
@@ -414,6 +419,9 @@ def detect_break_high_price(options, result_text):
     # Save updated detection history
     save_detection_history(detection_history)
     
+    # Populate the shared list for the trading plan window
+    output_list_for_plan.extend(detected_stocks)
+
     # Clear the result text and only show the detected stocks
     result_text.delete(1.0, END)
     
@@ -439,6 +447,81 @@ def detect_break_high_price(options, result_text):
     # Show summary
     result_text.insert(END, f"\nDetection complete. Found {len(detected_stocks)} stocks breaking high price.\n")
     result_text.see(END)
+
+    # Update continue button state based on whether stocks were detected
+    if detected_stocks: # Check the local list populated in this run
+        if continue_button_ref.winfo_exists():
+            root.after(0, lambda: continue_button_ref.config(state=NORMAL))
+    # No explicit else to disable, as it's disabled at the start and only enabled if stocks are found.
+    # However, to be absolutely sure if the logic flow changes, an explicit disable could be here:
+    # else:
+    #     if continue_button_ref.winfo_exists():
+    #         root.after(0, lambda: continue_button_ref.config(state=DISABLED))
+
+def open_trading_plan_window(parent_window, detected_stocks_data):
+    """Open a new window to select stocks for trading plan generation."""
+    plan_window = ttk.Toplevel(parent_window)
+    plan_window.title("Generate Trading Plan")
+    plan_window.geometry("400x500")
+
+    if not detected_stocks_data:
+        ttk.Label(plan_window, text="No stocks detected or detection not run yet.", padding=20).pack()
+        return
+
+    main_frame = ttk.Frame(plan_window, padding=10)
+    main_frame.pack(fill=BOTH, expand=True)
+
+    ttk.Label(main_frame, text="Select stocks to generate trading plan for:", font=("Helvetica", 10, "bold")).pack(anchor=W, pady=(0, 10))
+
+    stocks_frame = ttk.Frame(main_frame)
+    stocks_frame.pack(fill=BOTH, expand=True, pady=5)
+    
+    selected_stocks_vars = {} # Store {stock_name: BooleanVar}
+
+    for stock_info in detected_stocks_data:
+        stock_name = stock_info[0]
+        var = ttk.BooleanVar(value=False)
+        chk = ttk.Checkbutton(stocks_frame, text=stock_name, variable=var)
+        chk.pack(anchor=W)
+        selected_stocks_vars[stock_name] = var
+
+    button_frame = ttk.Frame(main_frame)
+    button_frame.pack(fill=X, pady=(10, 0))
+
+    generate_plan_button = ttk.Button(button_frame, text="Generate Plan", state=DISABLED, bootstyle="success")
+    generate_plan_button.pack(side=RIGHT)
+
+    def update_generate_button_state(*args):
+        if any(var.get() for var in selected_stocks_vars.values()):
+            generate_plan_button.config(state=NORMAL)
+        else:
+            generate_plan_button.config(state=DISABLED)
+
+    for var in selected_stocks_vars.values():
+        var.trace_add("write", update_generate_button_state)
+    
+    # Initial check
+    update_generate_button_state()
+
+    def generate_plan_for_selected_action():
+        selected_names = [name for name, var in selected_stocks_vars.items() if var.get()]
+        # Placeholder for actual plan generation
+        print(f"Placeholder: Generating trading plan for: {', '.join(selected_names)}")
+        # You would typically pass selected_names and potentially relevant data from detected_stocks_data
+        # to another function or display results in a new dialog/text area.
+        
+        # For now, just show a simple message in the window
+        existing_labels = [widget for widget in main_frame.winfo_children() if isinstance(widget, ttk.Label) and "Generating plan for" in widget.cget("text")]
+        for label in existing_labels:
+            label.destroy()
+        
+        if selected_names:
+            ttk.Label(main_frame, text=f"Generating plan for: {', '.join(selected_names)}").pack(pady=10)
+        else:
+            ttk.Label(main_frame, text="No stocks selected.").pack(pady=10)
+
+
+    generate_plan_button.config(command=generate_plan_for_selected_action)
 
 def open_generator_window():
     """Open a new window for the generator"""
@@ -482,21 +565,38 @@ def open_generator_window():
     scrollbar.pack(fill=Y, side=RIGHT)
     result_text.config(yscrollcommand=scrollbar.set)
     
+    # Shared list for detected stocks to be passed to the trading plan window
+    shared_detected_stocks_list = []
+
+    # Continue button (initially disabled)
+    continue_button = ttk.Button(
+        button_frame,
+        text="Continue",
+        bootstyle="info",
+        state=DISABLED, # Start disabled
+        command=lambda: open_trading_plan_window(generator_window, shared_detected_stocks_list)
+    )
+    # Pack order matters: Run Detection then Continue
+    # run_button is defined and packed next
+
     # Run button
     run_button = ttk.Button(
         button_frame, 
         text="Run Detection", 
         bootstyle="success",
         command=lambda: threading.Thread(
-            target=detect_break_high_price,
+            target=detect_break_high_price, # Will be modified to accept new args
             args=(
                 {k: v.get() for k, v in options.items()},
-                result_text
+                result_text,
+                continue_button,  # Pass the button reference
+                shared_detected_stocks_list # Pass the list to be populated
             ),
             daemon=True
         ).start()
     )
     run_button.pack(side=LEFT, padx=5)
+    continue_button.pack(side=LEFT, padx=5) # Packed after run_button
 
 def show_main_page():
     # Remove API check elements
