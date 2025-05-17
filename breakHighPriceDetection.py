@@ -82,12 +82,22 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                     return stock, None, f"No historical data for {stock}."
 
                 latest_close = df.iloc[-1]["close"]
+                latest_high_of_day = df.iloc[-1]["high"]
+                latest_low_of_day = df.iloc[-1]["low"]
                 latest_date_df = df.iloc[-1]["date"]
-                # Ensure latest_date_df is comparable with latest_date_for_run_dt (both should be datetime objects)
-                # latest_date_for_run_dt is passed as datetime.date, convert latest_date_df to date for comparison if needed or ensure consistency
-                # For simplicity, this example assumes direct comparison or that types are handled prior/post this function.
-                # For the purpose of break detection, we use the latest data from the stock's own history.
                 latest_date_str = latest_date_df.strftime("%Y-%m-%d")
+
+                # Find potential TP levels from historical highs > latest_high_of_day
+                potential_tp_levels_from_history = []
+                if not df.empty and len(df) > 1: # Ensure there's historical data to check against
+                    # Exclude the most recent day's high since TPs should be above it.
+                    # We consider all highs from days *before* the latest_date_df.
+                    historical_data_for_tp_search = df[df["date"] < latest_date_df]
+                    if not historical_data_for_tp_search.empty:
+                        historical_highs_values = historical_data_for_tp_search["high"]
+                        higher_historical_highs = historical_highs_values[historical_highs_values > latest_high_of_day]
+                        if not higher_historical_highs.empty:
+                            potential_tp_levels_from_history = sorted(list(set(higher_historical_highs.tolist())))
                 
                 # debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
                 # progress_callback(debug_message)
@@ -196,9 +206,11 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                         break_reasons.append(reason)
                 
                 if broke_high:
-                    return stock, (break_reasons, latest_close, high_prices_for_stock_output, break_types_for_history), None # No error
+                    # Return: stock, (break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_for_stock_output, break_types_for_history, potential_tp_levels_from_history), error_message
+                    return stock, (break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_for_stock_output, break_types_for_history, potential_tp_levels_from_history), None
                 else:
-                    return stock, None, f"No breaks for {stock}."
+                    # For consistency, return the full tuple structure even if no break, with empty break_reasons and high_prices_for_stock_output
+                    return stock, ([], latest_close, latest_low_of_day, latest_high_of_day, {}, break_types_for_history, potential_tp_levels_from_history), f"No breaks for {stock}."
 
             elif isinstance(data, dict) and data.get("message") == "No data found":
                  return stock, None, f"No data found for {stock} via API."
@@ -279,25 +291,31 @@ def detect_break_high_price(options, output_list_for_plan, progress_callback, co
 
                 if error_message:
                     progress_callback(f"Skipped: {error_message}\n")
+                    # Even if skipped due to "No breaks", result_data might contain latest prices and potential_tp_levels
+                    # If we wanted to use that, we could, but for now, we only add to detected_stocks_for_processing if there was an actual break.
                 
-                if result_data: # (break_reasons, latest_close, high_prices_for_stock_output, break_types_for_history)
-                    break_reasons, latest_close, high_prices_output, break_types_hist = result_data
-                    detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, high_prices_output))
+                # We now only proceed to add to detected_stocks_for_processing if there are actual break_reasons.
+                # The result_data from fetch_and_process_stock_data always has the full tuple structure.
+                if result_data:
+                    break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, break_types_hist, potential_tp_levels = result_data
                     
-                    progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
+                    if break_reasons: # Only proceed if actual break reasons exist
+                        # Append tuple: (stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history)
+                        detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, potential_tp_levels))
+                        progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
 
-                    # Update history for this stock for today
-                    if stock_symbol_result not in detection_history[current_date_str]:
-                        detection_history[current_date_str][stock_symbol_result] = {}
-                    
-                    # Persist break types (dates, days_since) and associated high prices
-                    for key, value in break_types_hist.items():
-                         detection_history[current_date_str][stock_symbol_result][key] = value
-                    if high_prices_output: 
-                        # Ensure high_prices key exists before trying to merge with it
-                        if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
-                            detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
-                        detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
+                        # Update history for this stock for today (only if it was a break)
+                        if stock_symbol_result not in detection_history[current_date_str]:
+                            detection_history[current_date_str][stock_symbol_result] = {}
+                        
+                        # Persist break types (dates, days_since) and associated high prices
+                        for key, value in break_types_hist.items():
+                             detection_history[current_date_str][stock_symbol_result][key] = value
+                        if high_prices_output: 
+                            # Ensure high_prices key exists before trying to merge with it
+                            if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
+                                detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
+                            detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
                 
             except Exception as exc:
                 processed_count += 1 # Still count as processed for progress
@@ -309,20 +327,13 @@ def detect_break_high_price(options, output_list_for_plan, progress_callback, co
     summary_text_parts = []
     if detected_stocks_for_processing:
         summary_text_parts.append("Detected stocks breaking high price:\n\n")
-        for stock_name, reasons, close, highs_info in detected_stocks_for_processing:
-            summary_text_parts.append(f"{stock_name}: {', '.join(reasons)} - Close: {close:.2f}\n")
-            # Add high price information for each break type
-            if highs_info: # Check if highs_info is not empty
-                for reason_text in reasons: # Iterate through the reasons to decide which high to print
-                    if "5 Days" in reason_text and "5d" in highs_info:
-                        summary_text_parts.append(f"    5 Days High: {highs_info['5d']:.2f}\n")
-                    if "1 Month" in reason_text and "1m" in highs_info:
-                        summary_text_parts.append(f"    1 Month High: {highs_info['1m']:.2f}\n")
-                    if "2 Months" in reason_text and "2m" in highs_info:
-                        summary_text_parts.append(f"    2 Months High: {highs_info['2m']:.2f}\n")
-                    if "3 Months" in reason_text and "3m" in highs_info:
-                        summary_text_parts.append(f"    3 Months High: {highs_info['3m']:.2f}\n")
-            summary_text_parts.append("\n")
+        for stock_name, reasons, close, low_of_day, high_of_day, highs_info, pot_tps in detected_stocks_for_processing:
+            summary_text_parts.append(f"{stock_name}: { ', '.join(reasons) } - Close: {close:.2f}, Low: {low_of_day:.2f}, High: {high_of_day:.2f}\n")
+            if highs_info: # This is period_high_prices_info (highs that were broken)
+                summary_text_parts.append(f"    Broken Period Highs: { {k: f'{v:.2f}' for k, v in highs_info.items()} }\n")
+            if pot_tps:
+                summary_text_parts.append(f"    Potential TPs from History (> {high_of_day:.2f}): { [f'{tp:.2f}' for tp in pot_tps[:3]] }\n") # Show first 3
+            summary_text_parts.append("\n") # Add a newline for better readability per stock
     else:
         summary_text_parts.append("No stocks breaking high price detected.\n")
     

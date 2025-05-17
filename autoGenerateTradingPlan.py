@@ -3,16 +3,18 @@ from tkinter.constants import END, NORMAL, DISABLED # Import necessary constants
 
 def generate_plans_for_stocks(selected_stocks_details):
     """
-    Placeholder function to generate trading plans.
+    Generates trading plans based on detected stock breaks.
     
     Args:
         selected_stocks_details: A list of tuples, where each tuple contains 
-                                 (stock_name, reasons, latest_close, high_prices)
+                                 (stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, 
+                                  period_high_prices_info, potential_tp_levels_from_history)
                                  for the stocks selected by the user.
+                                 period_high_prices_info is a dict like {'5d': 123.45, '1m': 125.00}
+                                 potential_tp_levels_from_history is a sorted list of floats.
 
     Returns:
-        A list of generated plan objects/dictionaries (placeholder).
-        Each dictionary represents a plan for a stock.
+        A list of generated plan objects/dictionaries.
     """
     generated_plans = []
     if not selected_stocks_details:
@@ -22,33 +24,41 @@ def generate_plans_for_stocks(selected_stocks_details):
     print(f"autoGenerateTradingPlan.py: Received {len(selected_stocks_details)} stocks for plan generation.")
 
     for stock_detail in selected_stocks_details:
-        stock_name, reasons, latest_close, high_prices = stock_detail
+        stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history = stock_detail 
         
-        # Placeholder logic:
-        # In a real scenario, you'd use latest_close, high_prices, and reasons 
-        # to calculate entry, stop-loss, take-profit levels.
-        entry_price = latest_close * 1.005 # Example: entry slightly above close
-        stop_loss = latest_close * 0.98  # Example: 2% stop loss
-        tp1 = entry_price + (entry_price - stop_loss) * 1   # RR 1:1
-        tp2 = entry_price + (entry_price - stop_loss) * 1.5 # RR 1:1.5
-        tp3 = entry_price + (entry_price - stop_loss) * 2   # RR 1:2
+        entry_price_str = f"{latest_low_of_day:.2f} - {latest_high_of_day:.2f}"
+        calculation_base_price = latest_close 
+        stop_loss_val = calculation_base_price * 0.98  # Example: 2% stop loss from latest_close
+
+        # New TP logic using potential_tp_levels_from_history
+        tp1_val_num, tp2_val_num, tp3_val_num = None, None, None
+
+        if potential_tp_levels_from_history:
+            if len(potential_tp_levels_from_history) > 0:
+                tp1_val_num = potential_tp_levels_from_history[0]
+            if len(potential_tp_levels_from_history) > 1:
+                tp2_val_num = potential_tp_levels_from_history[1]
+            if len(potential_tp_levels_from_history) > 2:
+                tp3_val_num = potential_tp_levels_from_history[2]
         
-        rr_tp1 = "1:1" # Placeholder
+        rr_tp1_str = "N/A" 
         
         plan = {
             "stock": stock_name,
             "reasons": ", ".join(reasons),
-            "latest_close": f"{latest_close:.2f}",
-            "entry_price": f"{entry_price:.2f}",
-            "stop_loss": f"{stop_loss:.2f}",
-            "tp1": f"{tp1:.2f}",
-            "tp2": f"{tp2:.2f}",
-            "tp3": f"{tp3:.2f}",
-            "rr_tp1": rr_tp1,
-            "notes": f"Plan for {stock_name} based on {', '.join(reasons)}."
+            "latest_close": f"{latest_close:.2f}", 
+            "latest_low_of_day": f"{latest_low_of_day:.2f}",
+            "latest_high_of_day": f"{latest_high_of_day:.2f}",
+            "entry_price": entry_price_str, 
+            "stop_loss": f"{stop_loss_val:.2f}",
+            "tp1": f"{tp1_val_num:.2f}" if tp1_val_num is not None else "N/A",
+            "tp2": f"{tp2_val_num:.2f}" if tp2_val_num is not None else "N/A",
+            "tp3": f"{tp3_val_num:.2f}" if tp3_val_num is not None else "N/A",
+            "rr_tp1": rr_tp1_str,
+            "notes": f"Plan for {stock_name} based on { ', '.join(reasons) }."
         }
         generated_plans.append(plan)
-        print(f"autoGenerateTradingPlan.py: Generated placeholder plan for {stock_name}")
+        print(f"autoGenerateTradingPlan.py: Generated plan for {stock_name} with TPs: {plan['tp1']}, {plan['tp2']}, {plan['tp3']}")
         
     return generated_plans
 
