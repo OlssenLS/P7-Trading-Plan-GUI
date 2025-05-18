@@ -9,8 +9,9 @@ import json
 from tkinter import simpledialog # For asking risk percentage
 
 # Import from the new module
-from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE
+from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
 from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder # Import new functions
+from stockScreening import placeholder_screen_stocks # Import screener function
 
 # Get the script directory for file paths - This SCRIPT_DIR is for main.py specific paths if any.
 # The breakHighPriceDetection module manages its own SCRIPT_DIR for its file operations.
@@ -216,16 +217,20 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     if original_plan_window and original_plan_window.winfo_exists():
         original_plan_window.destroy()
 
-def open_trading_plan_window(parent_window, detected_stocks_data):
+def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, original_screener_window=None):
     """Open a new window to select stocks for trading plan generation."""
+    # Close the screener window if it exists and is passed
+    if original_screener_window and original_screener_window.winfo_exists():
+        original_screener_window.destroy()
+
     plan_window = ttk.Toplevel(parent_window)
     plan_window.title("Generate Trading Plan")
     plan_window.geometry("400x500")
     plan_window.transient(parent_window) # Make it appear on top of its parent
     plan_window.grab_set() # Make it modal
 
-    if not detected_stocks_data:
-        ttk.Label(plan_window, text="No stocks detected or detection not run yet.", padding=20).pack()
+    if not stocks_for_plan_generation_data:
+        ttk.Label(plan_window, text="No stocks available or selected from screener for plan generation.", padding=20).pack()
         # Add a button to close this window if no stocks
         ttk.Button(plan_window, text="Close", command=plan_window.destroy).pack(pady=10)
         return
@@ -240,9 +245,9 @@ def open_trading_plan_window(parent_window, detected_stocks_data):
     
     selected_stocks_vars = {} # Store {stock_name: BooleanVar}
 
-    for stock_info in detected_stocks_data:
+    for stock_info in stocks_for_plan_generation_data:
         stock_name = stock_info[0]
-        var = ttk.BooleanVar(value=False)
+        var = ttk.BooleanVar(value=False) # Default to False, user must select
         # Task 1: Add a little spacing (pady) between checkboxes
         chk = ttk.Checkbutton(stocks_frame, text=stock_name, variable=var)
         chk.pack(anchor=W, pady=2) # Added pady=2 for spacing
@@ -267,24 +272,150 @@ def open_trading_plan_window(parent_window, detected_stocks_data):
 
     def generate_plan_for_selected_action():
         # Task 2: After the Generate Plan button is clicked...
-        selected_stock_details = []
-        for stock_data_item in detected_stocks_data: # detected_stocks_data is the full list
+        selected_stock_details_for_plan = []
+        for stock_data_item in stocks_for_plan_generation_data: # use the passed list
             stock_name = stock_data_item[0]
             if selected_stocks_vars.get(stock_name) and selected_stocks_vars[stock_name].get():
-                selected_stock_details.append(stock_data_item)
+                selected_stock_details_for_plan.append(stock_data_item)
         
-        if not selected_stock_details:
+        if not selected_stock_details_for_plan:
             simpledialog.messagebox.showwarning("No Selection", "Please select at least one stock to generate a plan.", parent=plan_window)
             return
 
         # Call the placeholder algorithm
-        generated_plans = generate_plans_for_stocks(selected_stock_details)
+        generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan)
         
         # Open the new window showing generated plans
         # The original plan_window will be closed by show_generated_plans_window
         show_generated_plans_window(plan_window.master, generated_plans, plan_window) 
 
     generate_plan_button.config(command=generate_plan_for_selected_action)
+
+def open_screener_window(parent_window, detected_stocks_for_break_high):
+    screener_window = ttk.Toplevel(parent_window)
+    screener_window.title("Stock Screener (Optional)")
+    screener_window.geometry("700x600") # Increased height for results
+    screener_window.transient(parent_window)
+    screener_window.grab_set()
+
+    # Main frame
+    main_screener_frame = ttk.Frame(screener_window, padding=10)
+    main_screener_frame.pack(fill=BOTH, expand=True)
+
+    # --- Stock Source Selection ---
+    source_frame = ttk.Labelframe(main_screener_frame, text="Stock Source", padding=10)
+    source_frame.pack(fill=X, pady=5)
+
+    stock_source_var = ttk.StringVar(value="detected_stocks") # Default to detected stocks
+
+    def update_run_button_state(*args):
+        # Run button can be enabled if a source is selected.
+        # For "detected_stocks", it's more meaningful if detected_stocks_for_break_high is not empty.
+        if stock_source_var.get() == "detected_stocks" and not detected_stocks_for_break_high:
+            run_screener_button.config(state=DISABLED)
+            if screener_results_text.winfo_exists():
+                 screener_results_text.insert(END, "Info: 'Detected Stocks' selected, but no stocks were detected in the previous step. Run detection first or choose 'All Stocks'.\n")
+                 screener_results_text.see(END)
+        else:
+            run_screener_button.config(state=NORMAL)
+
+    ttk.Radiobutton(source_frame, text="All Stocks (from stocks.txt)", variable=stock_source_var, value="all_stocks", command=update_run_button_state).pack(anchor=W)
+    ttk.Radiobutton(source_frame, text="Detected Stocks for Break High Price", variable=stock_source_var, value="detected_stocks", command=update_run_button_state).pack(anchor=W)
+
+    # --- Technical Indicators (Placeholder) ---
+    indicators_frame = ttk.Labelframe(main_screener_frame, text="Technical Indicators (Placeholder)", padding=10)
+    indicators_frame.pack(fill=X, pady=5)
+    
+    indicator_vars = {
+        "Indicator1": ttk.BooleanVar(value=False),
+        "Indicator2": ttk.BooleanVar(value=False),
+        "Indicator3": ttk.BooleanVar(value=False)
+    }
+    ttk.Checkbutton(indicators_frame, text="Placeholder Indicator 1 (e.g., MA Crossover)", variable=indicator_vars["Indicator1"]).pack(anchor=W)
+    ttk.Checkbutton(indicators_frame, text="Placeholder Indicator 2 (e.g., RSI Level)", variable=indicator_vars["Indicator2"]).pack(anchor=W)
+    ttk.Checkbutton(indicators_frame, text="Placeholder Indicator 3 (e.g., Volume Spike)", variable=indicator_vars["Indicator3"]).pack(anchor=W)
+
+    # --- Results Area ---
+    results_display_frame = ttk.Labelframe(main_screener_frame, text="Screener Results", padding=10)
+    results_display_frame.pack(fill=BOTH, expand=True, pady=5)
+
+    screener_results_text = ttk.Text(results_display_frame, wrap=WORD, height=10)
+    screener_results_text.pack(side=LEFT, fill=BOTH, expand=True)
+    
+    results_scrollbar = ttk.Scrollbar(results_display_frame, command=screener_results_text.yview)
+    results_scrollbar.pack(side=RIGHT, fill=Y)
+    screener_results_text.config(yscrollcommand=results_scrollbar.set)
+
+    # --- Buttons ---
+    screener_button_frame = ttk.Frame(main_screener_frame)
+    screener_button_frame.pack(fill=X, pady=(10,0))
+
+    # List to store stocks that pass the screener, in the format expected by open_trading_plan_window
+    # This will be populated by run_screener_action
+    screened_stocks_for_plan_generation = [] 
+
+    def screener_progress_callback_tk(message):
+        if screener_results_text.winfo_exists():
+            screener_results_text.insert(END, message)
+            screener_results_text.see(END)
+            # screener_results_text.update_idletasks() # Use if immediate update is critical
+
+    def run_screener_action():
+        nonlocal screened_stocks_for_plan_generation # Allow modification
+        screened_stocks_for_plan_generation.clear() # Clear previous results
+        
+        if screener_results_text.winfo_exists():
+            screener_results_text.delete(1.0, END) # Clear previous text
+
+        source_mode = stock_source_var.get()
+        selected_indicators = {k: v.get() for k, v in indicator_vars.items()}
+        
+        all_stocks_symbols_list = []
+        if source_mode == "all_stocks":
+            all_stocks_symbols_list = get_stock_list() # Fetches from stocks.txt
+
+        # Call the placeholder screening function (runs synchronously for now)
+        # In a real app, this might be threaded if it involves network requests for "All Stocks"
+        result_text, screened_stocks_output = placeholder_screen_stocks(
+            source_mode, 
+            all_stocks_symbols_list, 
+            detected_stocks_for_break_high, 
+            selected_indicators,
+            screener_progress_callback_tk # Pass the Tkinter-safe callback
+        )
+        
+        # The placeholder_screen_stocks now uses the callback, so direct insertion might be redundant
+        # if screener_results_text.winfo_exists():
+        #    screener_results_text.insert(END, result_text)
+        #    screener_results_text.see(END)
+
+        screened_stocks_for_plan_generation.extend(screened_stocks_output)
+
+        if screened_stocks_for_plan_generation:
+            continue_to_plan_button.config(state=NORMAL)
+            screener_progress_callback_tk(f"\nScreening complete. {len(screened_stocks_for_plan_generation)} stock(s) met criteria for plan generation.\n")
+        else:
+            continue_to_plan_button.config(state=DISABLED)
+            screener_progress_callback_tk(f"\nScreening complete. No stocks met criteria for plan generation.\n")
+            if source_mode == "all_stocks":
+                 screener_progress_callback_tk("Reminder: 'All Stocks' mode currently does not prepare data for plan generation in this placeholder version.\n")
+
+
+    run_screener_button = ttk.Button(screener_button_frame, text="Run Screener", command=run_screener_action, bootstyle="primary")
+    run_screener_button.pack(side=LEFT, padx=5)
+    
+    # Initial state check for Run Screener button
+    update_run_button_state() 
+
+    def continue_to_plan_action():
+        if not screened_stocks_for_plan_generation:
+            simpledialog.messagebox.showinfo("No Stocks", "No stocks were selected or passed the screener for plan generation.", parent=screener_window)
+            return
+        # Pass the screener_window to be closed by open_trading_plan_window
+        open_trading_plan_window(screener_window.master, screened_stocks_for_plan_generation, original_screener_window=screener_window)
+
+    continue_to_plan_button = ttk.Button(screener_button_frame, text="Continue to Plan Generation", state=DISABLED, command=continue_to_plan_action, bootstyle="success")
+    continue_to_plan_button.pack(side=RIGHT, padx=5)
 
 def open_generator_window():
     """Open a new window for the generator"""
@@ -334,7 +465,7 @@ def open_generator_window():
     # Continue button (initially disabled)
     continue_button = ttk.Button(
         button_frame,
-        text="Continue",
+        text="Continue to Plan Setup", # Renamed for clarity
         bootstyle="info",
         state=DISABLED, # Start disabled
         command=lambda: open_trading_plan_window(generator_window, shared_detected_stocks_list)
@@ -381,7 +512,17 @@ def open_generator_window():
         ).start()
     )
     run_button.pack(side=LEFT, padx=5)
-    continue_button.pack(side=LEFT, padx=5) # Packed after run_button
+    
+    # Screener (Optional) Button
+    screener_button = ttk.Button(
+        button_frame,
+        text="Screener (Optional)",
+        bootstyle="secondary", # Different style
+        command=lambda: open_screener_window(generator_window, shared_detected_stocks_list)
+    )
+    screener_button.pack(side=LEFT, padx=5) # Placed after Run Detection
+    
+    continue_button.pack(side=LEFT, padx=5) # Placed after Screener button
 
 def show_main_page():
     global main_plan_display_treeview # Declare global to assign
