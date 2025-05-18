@@ -26,6 +26,13 @@ def generate_plans_for_stocks(selected_stocks_details):
     for stock_detail in selected_stocks_details:
         stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history = stock_detail 
         
+        # DEBUG: Log input values for TP calculation
+        print(f"[DEBUG] Processing {stock_name}: Entry range {latest_low_of_day:.2f}-{latest_high_of_day:.2f}")
+        if potential_tp_levels_from_history:
+            print(f"[DEBUG] {stock_name}: Received {len(potential_tp_levels_from_history)} potential TP levels: {[f'{tp:.2f}' for tp in potential_tp_levels_from_history]}")
+        else:
+            print(f"[DEBUG] {stock_name}: No potential TP levels received from historical data")
+            
         entry_price_str = f"{latest_low_of_day:.2f} - {latest_high_of_day:.2f}"
         calculation_base_price = latest_close 
         stop_loss_val = calculation_base_price * 0.98  # Example: 2% stop loss from latest_close
@@ -36,10 +43,15 @@ def generate_plans_for_stocks(selected_stocks_details):
         if potential_tp_levels_from_history:
             if len(potential_tp_levels_from_history) > 0:
                 tp1_val_num = potential_tp_levels_from_history[0]
+                print(f"[DEBUG] {stock_name}: Setting TP1 = {tp1_val_num:.2f}")
             if len(potential_tp_levels_from_history) > 1:
                 tp2_val_num = potential_tp_levels_from_history[1]
+                print(f"[DEBUG] {stock_name}: Setting TP2 = {tp2_val_num:.2f}")
             if len(potential_tp_levels_from_history) > 2:
                 tp3_val_num = potential_tp_levels_from_history[2]
+                print(f"[DEBUG] {stock_name}: Setting TP3 = {tp3_val_num:.2f}")
+        else:
+            print(f"[DEBUG] {stock_name}: No TP levels can be set - will use N/A")
         
         rr_tp1_str = "N/A" 
         

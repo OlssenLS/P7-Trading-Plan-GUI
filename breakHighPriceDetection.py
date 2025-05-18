@@ -71,7 +71,22 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, dict) and "historical_data" in data and data["historical_data"] and len(data["historical_data"]) > 0:
-                # progress_callback(f"  Got data for {stock} ({len(data['historical_data'])} records)\n")
+                # DEBUG: Log API response details
+                print(f"[DEBUG] {stock}: API returned {len(data['historical_data'])} data points")
+                
+                # Check the earliest and latest dates in the API response
+                try:
+                    dates = [item.get('date') for item in data['historical_data'] if 'date' in item]
+                    if dates:
+                        earliest_date = min(dates)
+                        latest_date = max(dates)
+                        print(f"[DEBUG] {stock}: Date range in API data: {earliest_date} to {latest_date}")
+                    # Log a sample data point to verify structure
+                    if data['historical_data']:
+                        sample_point = data['historical_data'][0]
+                        print(f"[DEBUG] {stock}: Sample data structure: {sample_point}")
+                except Exception as e:
+                    print(f"[DEBUG] {stock}: Error parsing API dates: {e}")
                 
                 df = pd.DataFrame(data["historical_data"])
                 df["date"] = pd.to_datetime(df["date"])
@@ -93,11 +108,30 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                     # Exclude the most recent day's high since TPs should be above it.
                     # We consider all highs from days *before* the latest_date_df.
                     historical_data_for_tp_search = df[df["date"] < latest_date_df]
+                    
+                    # DEBUG: Log historical data stats
+                    print(f"[DEBUG] {stock}: Total historical days: {len(df)}, Days before latest: {len(historical_data_for_tp_search)}")
+                    print(f"[DEBUG] {stock}: Latest high: {latest_high_of_day:.2f}, Latest date: {latest_date_str}")
+                    
                     if not historical_data_for_tp_search.empty:
                         historical_highs_values = historical_data_for_tp_search["high"]
                         higher_historical_highs = historical_highs_values[historical_highs_values > latest_high_of_day]
+                        
+                        # DEBUG: Log higher highs found
+                        higher_count = len(higher_historical_highs) if not higher_historical_highs.empty else 0
+                        print(f"[DEBUG] {stock}: Found {higher_count} historical highs > {latest_high_of_day:.2f}")
+                        
                         if not higher_historical_highs.empty:
                             potential_tp_levels_from_history = sorted(list(set(higher_historical_highs.tolist())))
+                            
+                            # DEBUG: Log actual values
+                            print(f"[DEBUG] {stock}: Sorted unique higher highs: {[f'{h:.2f}' for h in potential_tp_levels_from_history]}")
+                        else:
+                            print(f"[DEBUG] {stock}: No higher historical highs found")
+                    else:
+                        print(f"[DEBUG] {stock}: No historical data before latest date")
+                else:
+                    print(f"[DEBUG] {stock}: Insufficient historical data for TP search")
                 
                 # debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
                 # progress_callback(debug_message)
