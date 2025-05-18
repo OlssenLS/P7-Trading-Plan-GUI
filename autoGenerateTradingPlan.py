@@ -1,5 +1,6 @@
 # autoGenerateTradingPlan.py
-from tkinter.constants import END, NORMAL, DISABLED # Import necessary constants
+from tkinter.constants import END # Import necessary constants
+from priceConversion import adjust_price_by_fraction # Import the new function
 
 def generate_plans_for_stocks(selected_stocks_details):
     """
@@ -27,29 +28,39 @@ def generate_plans_for_stocks(selected_stocks_details):
         stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history = stock_detail 
         
         # DEBUG: Log input values for TP calculation
-        print(f"[DEBUG] Processing {stock_name}: Entry range {latest_low_of_day:.2f}-{latest_high_of_day:.2f}")
+        print(f"[DEBUG] Processing {stock_name}: Raw Entry range {latest_low_of_day:.2f}-{latest_high_of_day:.2f}")
         if potential_tp_levels_from_history:
             print(f"[DEBUG] {stock_name}: Received {len(potential_tp_levels_from_history)} potential TP levels: {[f'{tp:.2f}' for tp in potential_tp_levels_from_history]}")
         else:
             print(f"[DEBUG] {stock_name}: No potential TP levels received from historical data")
             
-        entry_price_str = f"{latest_low_of_day:.2f} - {latest_high_of_day:.2f}"
+        # Adjust the low and high for the entry price range
+        adjusted_entry_low = adjust_price_by_fraction(latest_low_of_day)
+        adjusted_entry_high = adjust_price_by_fraction(latest_high_of_day)
+        entry_price_str = f"{adjusted_entry_low} - {adjusted_entry_high}"
+        print(f"[DEBUG] {stock_name}: Adjusted Entry Price Range: {entry_price_str}")
+        
         calculation_base_price = latest_close 
-        stop_loss_val = calculation_base_price * 0.98  # Example: 2% stop loss from latest_close
+        # Calculate and adjust stop loss
+        stop_loss_val_raw = calculation_base_price * 0.98  # Example: 2% stop loss from latest_close
+        stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
 
-        # New TP logic using potential_tp_levels_from_history
-        tp1_val_num, tp2_val_num, tp3_val_num = None, None, None
+        # New TP logic using potential_tp_levels_from_history, then adjust them
+        tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
 
         if potential_tp_levels_from_history:
             if len(potential_tp_levels_from_history) > 0:
-                tp1_val_num = potential_tp_levels_from_history[0]
-                print(f"[DEBUG] {stock_name}: Setting TP1 = {tp1_val_num:.2f}")
+                tp1_val_raw = potential_tp_levels_from_history[0]
+                tp1_val_adj = adjust_price_by_fraction(tp1_val_raw)
+                print(f"[DEBUG] {stock_name}: Setting TP1 = {tp1_val_raw:.2f}, Adjusted TP1 = {tp1_val_adj}")
             if len(potential_tp_levels_from_history) > 1:
-                tp2_val_num = potential_tp_levels_from_history[1]
-                print(f"[DEBUG] {stock_name}: Setting TP2 = {tp2_val_num:.2f}")
+                tp2_val_raw = potential_tp_levels_from_history[1]
+                tp2_val_adj = adjust_price_by_fraction(tp2_val_raw)
+                print(f"[DEBUG] {stock_name}: Setting TP2 = {tp2_val_raw:.2f}, Adjusted TP2 = {tp2_val_adj}")
             if len(potential_tp_levels_from_history) > 2:
-                tp3_val_num = potential_tp_levels_from_history[2]
-                print(f"[DEBUG] {stock_name}: Setting TP3 = {tp3_val_num:.2f}")
+                tp3_val_raw = potential_tp_levels_from_history[2]
+                tp3_val_adj = adjust_price_by_fraction(tp3_val_raw)
+                print(f"[DEBUG] {stock_name}: Setting TP3 = {tp3_val_raw:.2f}, Adjusted TP3 = {tp3_val_adj}")
         else:
             print(f"[DEBUG] {stock_name}: No TP levels can be set - will use N/A")
         
@@ -61,11 +72,11 @@ def generate_plans_for_stocks(selected_stocks_details):
             "latest_close": f"{latest_close:.2f}", 
             "latest_low_of_day": f"{latest_low_of_day:.2f}",
             "latest_high_of_day": f"{latest_high_of_day:.2f}",
-            "entry_price": entry_price_str, 
-            "stop_loss": f"{stop_loss_val:.2f}",
-            "tp1": f"{tp1_val_num:.2f}" if tp1_val_num is not None else "N/A",
-            "tp2": f"{tp2_val_num:.2f}" if tp2_val_num is not None else "N/A",
-            "tp3": f"{tp3_val_num:.2f}" if tp3_val_num is not None else "N/A",
+            "entry_price": entry_price_str, # Use adjusted range string
+            "stop_loss": f"{stop_loss_val_adj}",     # Use adjusted integer value, formatted as string
+            "tp1": f"{tp1_val_adj}" if tp1_val_adj is not None else "N/A",
+            "tp2": f"{tp2_val_adj}" if tp2_val_adj is not None else "N/A",
+            "tp3": f"{tp3_val_adj}" if tp3_val_adj is not None else "N/A",
             "rr_tp1": rr_tp1_str,
             "notes": f"Plan for {stock_name} based on { ', '.join(reasons) }."
         }

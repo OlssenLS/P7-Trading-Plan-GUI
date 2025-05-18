@@ -4,7 +4,7 @@ import threading
 import requests
 import os
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 from tkinter import simpledialog # For asking risk percentage
 
@@ -162,11 +162,11 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
 
     # Adjust column widths
     tree.column("stock", width=80, anchor=CENTER)
-    tree.column("entry_price", width=100, anchor=E)
-    tree.column("stop_loss", width=100, anchor=E)
-    tree.column("tp1", width=100, anchor=E)
-    tree.column("tp2", width=100, anchor=E)
-    tree.column("tp3", width=100, anchor=E)
+    tree.column("entry_price", width=100, anchor=CENTER)
+    tree.column("stop_loss", width=100, anchor=CENTER)
+    tree.column("tp1", width=100, anchor=CENTER)
+    tree.column("tp2", width=100, anchor=CENTER)
+    tree.column("tp3", width=100, anchor=CENTER)
     tree.column("rr_tp1", width=80, anchor=CENTER)
 
     # Insert data
@@ -440,11 +440,11 @@ def show_main_page():
 
     # Adjust column widths for the Treeview
     main_plan_display_treeview.column("stock", width=80, anchor=CENTER)
-    main_plan_display_treeview.column("entry_price", width=90, anchor=E) # Adjusted
-    main_plan_display_treeview.column("stop_loss", width=90, anchor=E)  # Adjusted
-    main_plan_display_treeview.column("tp1", width=90, anchor=E)       # Adjusted
-    main_plan_display_treeview.column("tp2", width=90, anchor=E)       # Adjusted
-    main_plan_display_treeview.column("tp3", width=90, anchor=E)       # Adjusted
+    main_plan_display_treeview.column("entry_price", width=90, anchor=CENTER) # Adjusted, Changed from E to CENTER
+    main_plan_display_treeview.column("stop_loss", width=90, anchor=CENTER)  # Adjusted, Changed from E to CENTER
+    main_plan_display_treeview.column("tp1", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    main_plan_display_treeview.column("tp2", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    main_plan_display_treeview.column("tp3", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
     main_plan_display_treeview.column("status", width=80, anchor=CENTER)
     main_plan_display_treeview.column("creation_date", width=120, anchor=CENTER) # Added
 
@@ -475,10 +475,9 @@ def open_manage_plans_window(parent_window):
     # We'll need a custom way to handle checkboxes in a treeview or use a list of checkbuttons if simpler
     # For now, let's set up the treeview structure. The actual selection mechanism will be decided.
     
-    cols = ("select", "stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated
+    cols = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated, removed "select"
     tree_manage = ttk.Treeview(main_manage_frame, columns=cols, show="headings", height=15)
 
-    tree_manage.heading("select", text="Select") 
     tree_manage.heading("stock", text="Stock")
     tree_manage.heading("entry_price", text="Entry")
     tree_manage.heading("stop_loss", text="SL")
@@ -488,13 +487,13 @@ def open_manage_plans_window(parent_window):
     tree_manage.heading("status", text="Status")
     tree_manage.heading("creation_date", text="Date Created") # Added
 
-    tree_manage.column("select", width=50, anchor=CENTER, stretch=False)
-    tree_manage.column("stock", width=80, anchor=W)
-    tree_manage.column("entry_price", width=90, anchor=E) # Adjusted
-    tree_manage.column("stop_loss", width=90, anchor=E)  # Adjusted
-    tree_manage.column("tp1", width=90, anchor=E)       # Adjusted
-    tree_manage.column("tp2", width=90, anchor=E)       # Adjusted
-    tree_manage.column("tp3", width=90, anchor=E)       # Adjusted
+    # tree_manage.column("select", width=50, anchor=CENTER, stretch=False) # Removed
+    tree_manage.column("stock", width=80, anchor=CENTER)
+    tree_manage.column("entry_price", width=90, anchor=CENTER) # Adjusted, Changed from E to CENTER
+    tree_manage.column("stop_loss", width=90, anchor=CENTER)  # Adjusted, Changed from E to CENTER
+    tree_manage.column("tp1", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    tree_manage.column("tp2", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    tree_manage.column("tp3", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
     tree_manage.column("status", width=80, anchor=CENTER)
     tree_manage.column("creation_date", width=120, anchor=CENTER) # Added
 
@@ -504,17 +503,14 @@ def open_manage_plans_window(parent_window):
     tree_manage.configure(yscrollcommand=scrollbar_manage_tree.set)
     scrollbar_manage_tree.pack(side=RIGHT, fill=Y, before=tree_manage) # Pack before tree to avoid overlap if not careful
 
-    selected_plans_vars = {} # To store BooleanVars for checkboxes, keyed by item ID or stock name
-
     def populate_manage_plans_tree():
         # Clear existing items
         for item in tree_manage.get_children():
             tree_manage.delete(item)
-        selected_plans_vars.clear()
 
         current_plans = load_plans_from_file()
         if not current_plans:
-            tree_manage.insert("", END, values=("", "No plans saved.", "", "", "", "", "", "", "")) # Adjusted
+            tree_manage.insert("", END, values=("No plans saved.", "", "", "", "", "", "", "")) # Adjusted for removed column
             return
 
         for i, plan_data in enumerate(current_plans):
@@ -530,7 +526,7 @@ def open_manage_plans_window(parent_window):
             # For selection, we'll use the treeview's built-in selection mechanism
             # and then retrieve selected items. Checkboxes in each row are complex.
             # Instead, we allow multi-selection in the treeview.
-            item_id = tree_manage.insert("", END, values=("", stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,)) # Adjusted
+            item_id = tree_manage.insert("", END, values=(stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,)) # Adjusted for removed column
             # The first column is kept empty for now, could be used for a visual cue later if needed
 
     populate_manage_plans_tree()
@@ -551,9 +547,9 @@ def open_manage_plans_window(parent_window):
             # Retrieve the stock name from the item's values or tags
             # Assuming stock name is unique and stored as a tag or in a specific column
             item_values = tree_manage.item(item_id, "values")
-            if item_values and len(item_values) > 1:
-                 # Assuming stock is the second column (index 1) after the placeholder 'select'
-                stock_name = item_values[1]
+            if item_values and len(item_values) > 0: # Check if item_values is not empty
+                 # Assuming stock is the first column (index 0) now that 'select' is removed
+                stock_name = item_values[0]
                 if stock_name != "No plans saved.": # Ensure it's a valid stock
                     stocks_to_delete.add(stock_name)
             
