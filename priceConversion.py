@@ -9,17 +9,7 @@ def adjust_price_by_fraction(price):
         int: The adjusted price, rounded to the nearest valid fraction.
     """
     price = float(price) # Ensure price is float for comparisons
-
-    if price < 200:
-        fraction = 1
-    elif 200 <= price < 500: # Corrected upper bound for this range
-        fraction = 2
-    elif 500 <= price < 2000:
-        fraction = 5
-    elif 2000 <= price < 5000:
-        fraction = 10
-    else: # price >= 5000
-        fraction = 25
+    fraction = get_fraction_for_price(price) # Use helper
 
     # Adjust the price to the nearest multiple of the fraction
     # For upward adjustment (e.g., for entry prices, take profit)
@@ -28,6 +18,46 @@ def adjust_price_by_fraction(price):
     adjusted_price = round(price / fraction) * fraction
     
     return int(adjusted_price)
+
+def get_fraction_for_price(price):
+    """
+    Determines the IDX BEI price fraction for a given price.
+
+    Args:
+        price (float or int): The price.
+
+    Returns:
+        int: The fraction size.
+    """
+    price = float(price)
+    if price < 200:
+        return 1
+    elif 200 <= price < 500:
+        return 2
+    elif 500 <= price < 2000:
+        return 5
+    elif 2000 <= price < 5000:
+        return 10
+    else: # price >= 5000
+        return 25
+
+def add_ticks_to_price(base_price, num_ticks):
+    """
+    Adds a specified number of ticks to a base price, adhering to IDX BEI fraction rules.
+    Assumes base_price is already an adjusted price (i.e., aligns with a fraction).
+
+    Args:
+        base_price (float or int): The starting price, assumed to be adjusted.
+        num_ticks (int): The number of ticks to add.
+
+    Returns:
+        int: The new price after adding the ticks.
+    """
+    current_price = float(base_price)
+    for _ in range(num_ticks):
+        tick_size = get_fraction_for_price(current_price)
+        current_price += tick_size
+    return int(current_price)
 
 if __name__ == '__main__':
     # Test cases
@@ -146,3 +176,66 @@ if __name__ == '__main__':
     # It seems my initial test expectations for the boundary cases were slightly off,
     # but the rounding logic `round(price / fraction) * fraction` is a standard and generally good approach.
     # The key is that the fraction is determined by the *original* price, then rounding occurs. 
+
+    print("\n--- New Test Cases for get_fraction_for_price ---")
+    test_fractions_data = {
+        "Price 50": (50, 1),
+        "Price 199": (199, 1),
+        "Price 200": (200, 2),
+        "Price 499": (499, 2),
+        "Price 500": (500, 5),
+        "Price 1999": (1999, 5),
+        "Price 2000": (2000, 10),
+        "Price 4999": (4999, 10),
+        "Price 5000": (5000, 25),
+        "Price 10000": (10000, 25),
+    }
+    all_fraction_tests_passed = True
+    for desc, (price, expected_frac) in test_fractions_data.items():
+        frac = get_fraction_for_price(price)
+        if frac == expected_frac:
+            print(f"PASSED: {desc} - Input: {price}, Got Fraction: {frac}, Expected: {expected_frac}")
+        else:
+            print(f"FAILED: {desc} - Input: {price}, Got Fraction: {frac}, Expected: {expected_frac}")
+            all_fraction_tests_passed = False
+    if all_fraction_tests_passed:
+        print("All get_fraction_for_price test cases passed!")
+    else:
+        print("Some get_fraction_for_price test cases failed.")
+
+    print("\n--- New Test Cases for add_ticks_to_price ---")
+    # Assuming base_price is already adjusted as per function's expectation
+    test_add_ticks_data = [
+        # (description, base_price, num_ticks, expected_result)
+        ("5475 + 3 ticks (25)", 5475, 3, 5550),
+        ("199 + 3 ticks (1,2,2)", 199, 3, 204), # 199+1=200, 200+2=202, 202+2=204
+        ("498 + 3 ticks (2,5,5)", 498, 3, 510), # 498+2=500, 500+5=505, 505+5=510 (498 is adjusted from 498 or 497.5 etc.)
+        ("1998 + 2 ticks (5,10)", 1998, 2, 2013), # 1998 needs to be adjusted first if it's a raw price. Assuming it's an adjusted price (multiple of 2 or 1).
+                                                # If 1998 is taken as an already *adjusted* price (it is), its fraction is 5.
+                                                # 1998+5=2003. Frac for 2003 is 10. 2003+10=2013.
+        ("500 + 1 tick (5)", 500, 1, 505),
+        ("4999 + 1 tick (10)", 4999, 1, 5009), # This should be: 4999 (frac 10) + 10 = 5009 (frac 25).
+                                              # Let's manually check: 4999 (orig frac 10), add 10 -> 5009. Correct.
+        ("5000 + 0 ticks", 5000, 0, 5000)
+    ]
+
+    # Adjusting test for 1998, as it should be result of adjust_price_by_fraction first for clarity
+    # If adjust_price_by_fraction(1998) -> 1998 (frac 5)
+    # 1998 (base, frac 5) + 5 = 2003.
+    # 2003 (new_base, frac 10) + 10 = 2013. This test is correct.
+
+    all_add_ticks_tests_passed = True
+    for desc, base, ticks, expected in test_add_ticks_data:
+        # Ensure base price for test is 'adjusted' if it matters for the test logic
+        # For these tests, we assume 'base_price' given is what add_ticks_to_price receives
+        result = add_ticks_to_price(base, ticks)
+        if result == expected:
+            print(f"PASSED: {desc} - Base: {base}, Ticks: {ticks}, Got: {result}, Expected: {expected}")
+        else:
+            print(f"FAILED: {desc} - Base: {base}, Ticks: {ticks}, Got: {result}, Expected: {expected}")
+            all_add_ticks_tests_passed = False
+
+    if all_add_ticks_tests_passed:
+        print("All add_ticks_to_price test cases passed!")
+    else:
+        print("Some add_ticks_to_price test cases failed.") 

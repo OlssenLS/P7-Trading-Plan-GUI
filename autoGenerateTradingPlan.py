@@ -1,6 +1,6 @@
 # autoGenerateTradingPlan.py
 from tkinter.constants import END # Import necessary constants
-from priceConversion import adjust_price_by_fraction # Import the new function
+from priceConversion import adjust_price_by_fraction, get_fraction_for_price, add_ticks_to_price # Import the new functions
 
 def generate_plans_for_stocks(selected_stocks_details):
     """
@@ -12,7 +12,10 @@ def generate_plans_for_stocks(selected_stocks_details):
                                   period_high_prices_info, potential_tp_levels_from_history)
                                  for the stocks selected by the user.
                                  period_high_prices_info is a dict like {'5d': 123.45, '1m': 125.00}
-                                 potential_tp_levels_from_history is a sorted list of floats.
+                                 potential_tp_levels_from_history: A list of historical high prices (floats), 
+                                                                  ordered chronologically from most recent to oldest 
+                                                                  (e.g., YTD data first, then YTD-1, etc., 
+                                                                  down to the oldest available data like 2023-01-01).
 
     Returns:
         A list of generated plan objects/dictionaries.
@@ -45,75 +48,76 @@ def generate_plans_for_stocks(selected_stocks_details):
         stop_loss_calculation_base = float(adjusted_entry_low)
         
         # Calculate and adjust stop loss
-        stop_loss_val_raw = stop_loss_calculation_base * 0.95  # Example: 2% stop loss from adjusted_entry_low
+        stop_loss_val_raw = stop_loss_calculation_base * 0.95  # Example: 5% stop loss from adjusted_entry_low
         stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
 
         # New TP logic using potential_tp_levels_from_history, then adjust them
-        # Ensure TP1, TP2, TP3 are distinct and increasing after adjustment.
         tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
-        
-        adjusted_tps_found = [] # Stores the distinct adjusted TP values
+        min_ticks_separation = 3
+        tp_levels_raw = potential_tp_levels_from_history # Sorted list of floats
+        current_search_start_index = 0
 
-        if potential_tp_levels_from_history:
-            current_raw_tp_index = 0
-            
-            # Find TP1
-            if current_raw_tp_index < len(potential_tp_levels_from_history):
-                tp1_raw = potential_tp_levels_from_history[current_raw_tp_index]
-                adj_candidate = adjust_price_by_fraction(tp1_raw)
-                tp1_val_adj = adj_candidate # Accept the first one
-                adjusted_tps_found.append(tp1_val_adj)
-                print(f"[DEBUG] {stock_name}: Setting TP1 = {tp1_raw:.2f}, Adjusted TP1 = {tp1_val_adj}")
-                current_raw_tp_index += 1
-            
-            # Find TP2
-            # Ensure TP2_adjusted > TP1_adjusted
-            if tp1_val_adj is not None and current_raw_tp_index < len(potential_tp_levels_from_history):
-                found_distinct_tp2 = False
-                temp_search_index = current_raw_tp_index
-                while temp_search_index < len(potential_tp_levels_from_history):
-                    tp2_raw_candidate = potential_tp_levels_from_history[temp_search_index]
-                    adj_candidate = adjust_price_by_fraction(tp2_raw_candidate)
-                    if adj_candidate > adjusted_tps_found[-1]: # Must be greater than last found TP
-                        tp2_val_adj = adj_candidate
-                        adjusted_tps_found.append(tp2_val_adj)
-                        print(f"[DEBUG] {stock_name}: Setting TP2 = {tp2_raw_candidate:.2f}, Adjusted TP2 = {tp2_val_adj}")
-                        current_raw_tp_index = temp_search_index + 1 # Continue search for TP3 from next raw TP
-                        found_distinct_tp2 = True
-                        break
-                    temp_search_index += 1
-                if not found_distinct_tp2:
-                    print(f"[DEBUG] {stock_name}: Could not find a distinct Adjusted TP2 > {adjusted_tps_found[-1]}")
+        # Base for the first TP calculation is adjusted_entry_high
+        base_for_next_tp_min_target = adjusted_entry_high 
+        print(f"[DEBUG] {stock_name}: Initial base for TP1 min target calculation (adjusted_entry_high): {base_for_next_tp_min_target}")
 
-            # Find TP3
-            # Ensure TP3_adjusted > TP2_adjusted
-            if tp2_val_adj is not None and current_raw_tp_index < len(potential_tp_levels_from_history):
-                found_distinct_tp3 = False
-                temp_search_index = current_raw_tp_index
-                while temp_search_index < len(potential_tp_levels_from_history):
-                    tp3_raw_candidate = potential_tp_levels_from_history[temp_search_index]
-                    adj_candidate = adjust_price_by_fraction(tp3_raw_candidate)
-                    if adj_candidate > adjusted_tps_found[-1]: # Must be greater than last found TP
-                        tp3_val_adj = adj_candidate
-                        adjusted_tps_found.append(tp3_val_adj)
-                        print(f"[DEBUG] {stock_name}: Setting TP3 = {tp3_raw_candidate:.2f}, Adjusted TP3 = {tp3_val_adj}")
-                        # current_raw_tp_index = temp_search_index + 1 # Not strictly needed as it's the last TP
-                        found_distinct_tp3 = True
+        # Find TP1
+        if potential_tp_levels_from_history: # Ensure there are historical levels to search
+            calculated_min_target_tp1 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_separation)
+            print(f"[DEBUG] {stock_name}: TP1: Min target value based on '{base_for_next_tp_min_target}' + {min_ticks_separation} ticks = {calculated_min_target_tp1}")
+            raw_tp1_found_at_index = -1
+
+            for i in range(current_search_start_index, len(tp_levels_raw)):
+                raw_candidate = tp_levels_raw[i]
+                if raw_candidate >= calculated_min_target_tp1:
+                    adjusted_candidate = adjust_price_by_fraction(raw_candidate)
+                    if adjusted_candidate >= calculated_min_target_tp1: 
+                        tp1_val_adj = adjusted_candidate
+                        base_for_next_tp_min_target = tp1_val_adj # Update for TP2
+                        raw_tp1_found_at_index = i
+                        print(f"[DEBUG] {stock_name}: TP1 Found. Raw: {raw_candidate:.2f}, Adjusted: {tp1_val_adj} (Target was >= {calculated_min_target_tp1})")
                         break
-                    temp_search_index += 1
-                if not found_distinct_tp3:
-                    print(f"[DEBUG] {stock_name}: Could not find a distinct Adjusted TP3 > {adjusted_tps_found[-1]}")
-            elif tp1_val_adj is not None and tp2_val_adj is None:
-                 print(f"[DEBUG] {stock_name}: Skipping TP3 search as TP2 was not found or not distinct.")
+            if tp1_val_adj is None:
+                print(f"[DEBUG] {stock_name}: TP1 not found meeting criteria (raw >= {calculated_min_target_tp1} and adjusted >= {calculated_min_target_tp1}).")
+            current_search_start_index = raw_tp1_found_at_index + 1 if raw_tp1_found_at_index != -1 else len(tp_levels_raw)
+
+        # Find TP2
+        if tp1_val_adj is not None and potential_tp_levels_from_history: # Ensure TP1 was found and history exists
+            calculated_min_target_tp2 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_separation) # base is tp1_val_adj
+            print(f"[DEBUG] {stock_name}: TP2: Min target value based on TP1 '{base_for_next_tp_min_target}' + {min_ticks_separation} ticks = {calculated_min_target_tp2}")
+            raw_tp2_found_at_index = -1
+            for i in range(current_search_start_index, len(tp_levels_raw)):
+                raw_candidate = tp_levels_raw[i]
+                if raw_candidate >= calculated_min_target_tp2:
+                    adjusted_candidate = adjust_price_by_fraction(raw_candidate)
+                    if adjusted_candidate > tp1_val_adj and adjusted_candidate >= calculated_min_target_tp2:
+                        tp2_val_adj = adjusted_candidate
+                        base_for_next_tp_min_target = tp2_val_adj # Update for TP3
+                        raw_tp2_found_at_index = i
+                        print(f"[DEBUG] {stock_name}: TP2 Found. Raw: {raw_candidate:.2f}, Adjusted: {tp2_val_adj} (Target was >= {calculated_min_target_tp2}, > TP1 {tp1_val_adj})")
+                        break
+            if tp2_val_adj is None:
+                 print(f"[DEBUG] {stock_name}: TP2 not found meeting criteria (raw >= {calculated_min_target_tp2} and adjusted > TP1 {tp1_val_adj} and adjusted >= {calculated_min_target_tp2}).")
+            current_search_start_index = raw_tp2_found_at_index + 1 if raw_tp2_found_at_index != -1 else len(tp_levels_raw)
+
+        # Find TP3
+        if tp2_val_adj is not None and potential_tp_levels_from_history: # Ensure TP2 was found and history exists
+            calculated_min_target_tp3 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_separation) # base is tp2_val_adj
+            print(f"[DEBUG] {stock_name}: TP3: Min target value based on TP2 '{base_for_next_tp_min_target}' + {min_ticks_separation} ticks = {calculated_min_target_tp3}")
+            for i in range(current_search_start_index, len(tp_levels_raw)):
+                raw_candidate = tp_levels_raw[i]
+                if raw_candidate >= calculated_min_target_tp3:
+                    adjusted_candidate = adjust_price_by_fraction(raw_candidate)
+                    if adjusted_candidate > tp2_val_adj and adjusted_candidate >= calculated_min_target_tp3:
+                        tp3_val_adj = adjusted_candidate
+                        print(f"[DEBUG] {stock_name}: TP3 Found. Raw: {raw_candidate:.2f}, Adjusted: {tp3_val_adj} (Target was >= {calculated_min_target_tp3}, > TP2 {tp2_val_adj})")
+                        break # Found TP3
+            if tp3_val_adj is None:
+                print(f"[DEBUG] {stock_name}: TP3 not found meeting criteria (raw >= {calculated_min_target_tp3} and adjusted > TP2 {tp2_val_adj} and adjusted >= {calculated_min_target_tp3}).")
         
-        else:
-            print(f"[DEBUG] {stock_name}: No potential_tp_levels_from_history, TP levels will be N/A")
-        
-        # Re-assign from adjusted_tps_found list to ensure correct None handling if not enough TPs found
-        tp1_val_adj = adjusted_tps_found[0] if len(adjusted_tps_found) > 0 else None
-        tp2_val_adj = adjusted_tps_found[1] if len(adjusted_tps_found) > 1 else None
-        tp3_val_adj = adjusted_tps_found[2] if len(adjusted_tps_found) > 2 else None
-        
+        if not potential_tp_levels_from_history:
+             print(f"[DEBUG] {stock_name}: No potential_tp_levels_from_history, TP levels will likely be N/A unless base calculations suffice for some logic not implemented here.")
+
         rr_tp1_str = "N/A" 
         
         plan = {
