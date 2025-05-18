@@ -40,9 +40,12 @@ def generate_plans_for_stocks(selected_stocks_details):
         entry_price_str = f"{adjusted_entry_low} - {adjusted_entry_high}"
         print(f"[DEBUG] {stock_name}: Adjusted Entry Price Range: {entry_price_str}")
         
-        calculation_base_price = latest_close 
+        # Use the lower end of the adjusted entry price range for stop-loss calculation
+        # Ensure adjusted_entry_low is treated as a float for the calculation
+        stop_loss_calculation_base = float(adjusted_entry_low)
+        
         # Calculate and adjust stop loss
-        stop_loss_val_raw = calculation_base_price * 0.98  # Example: 2% stop loss from latest_close
+        stop_loss_val_raw = stop_loss_calculation_base * 0.95  # Example: 2% stop loss from adjusted_entry_low
         stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
 
         # New TP logic using potential_tp_levels_from_history, then adjust them
