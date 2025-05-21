@@ -53,7 +53,7 @@ def generate_plans_for_stocks(selected_stocks_details):
 
         # New TP logic using potential_tp_levels_from_history, then adjust them
         tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
-        min_ticks_separation = 3
+        min_ticks_separation = 3 # Default for TP1
         tp_levels_raw = potential_tp_levels_from_history # Sorted list of floats
         current_search_start_index = 0
 
@@ -83,8 +83,9 @@ def generate_plans_for_stocks(selected_stocks_details):
 
         # Find TP2
         if tp1_val_adj is not None and potential_tp_levels_from_history: # Ensure TP1 was found and history exists
-            calculated_min_target_tp2 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_separation) # base is tp1_val_adj
-            print(f"[DEBUG] {stock_name}: TP2: Min target value based on TP1 '{base_for_next_tp_min_target}' + {min_ticks_separation} ticks = {calculated_min_target_tp2}")
+            min_ticks_for_tp2 = 5 # Specific for TP2
+            calculated_min_target_tp2 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_for_tp2) # base is tp1_val_adj
+            print(f"[DEBUG] {stock_name}: TP2: Min target value based on TP1 '{base_for_next_tp_min_target}' + {min_ticks_for_tp2} ticks = {calculated_min_target_tp2}")
             raw_tp2_found_at_index = -1
             for i in range(current_search_start_index, len(tp_levels_raw)):
                 raw_candidate = tp_levels_raw[i]
@@ -102,8 +103,9 @@ def generate_plans_for_stocks(selected_stocks_details):
 
         # Find TP3
         if tp2_val_adj is not None and potential_tp_levels_from_history: # Ensure TP2 was found and history exists
-            calculated_min_target_tp3 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_separation) # base is tp2_val_adj
-            print(f"[DEBUG] {stock_name}: TP3: Min target value based on TP2 '{base_for_next_tp_min_target}' + {min_ticks_separation} ticks = {calculated_min_target_tp3}")
+            min_ticks_for_tp3 = 7 # Specific for TP3
+            calculated_min_target_tp3 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_for_tp3) # base is tp2_val_adj
+            print(f"[DEBUG] {stock_name}: TP3: Min target value based on TP2 '{base_for_next_tp_min_target}' + {min_ticks_for_tp3} ticks = {calculated_min_target_tp3}")
             for i in range(current_search_start_index, len(tp_levels_raw)):
                 raw_candidate = tp_levels_raw[i]
                 if raw_candidate >= calculated_min_target_tp3:
