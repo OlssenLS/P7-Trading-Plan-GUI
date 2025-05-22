@@ -2,7 +2,7 @@
 from tkinter.constants import END # Import necessary constants
 from priceConversion import adjust_price_by_fraction, get_fraction_for_price, add_ticks_to_price # Import the new functions
 
-def generate_plans_for_stocks(selected_stocks_details):
+def generate_plans_for_stocks(selected_stocks_details, plan_type="Swing Trader"):
     """
     Generates trading plans based on detected stock breaks.
     
@@ -16,6 +16,7 @@ def generate_plans_for_stocks(selected_stocks_details):
                                                                   ordered chronologically from most recent to oldest 
                                                                   (e.g., YTD data first, then YTD-1, etc., 
                                                                   down to the oldest available data like 2023-01-01).
+        plan_type (str): The type of trading plan, e.g., "Day Trader" or "Swing Trader". Defaults to "Swing Trader".
 
     Returns:
         A list of generated plan objects/dictionaries.
@@ -47,13 +48,26 @@ def generate_plans_for_stocks(selected_stocks_details):
         # Ensure adjusted_entry_low is treated as a float for the calculation
         stop_loss_calculation_base = float(adjusted_entry_low)
         
-        # Calculate and adjust stop loss
-        stop_loss_val_raw = stop_loss_calculation_base * 0.95  # Example: 5% stop loss from adjusted_entry_low
+        # Calculate and adjust stop loss based on plan_type
+        if plan_type == "Day Trader":
+            stop_loss_percentage = 0.98  # 2% stop loss for Day Trader
+            min_ticks_separation = 2
+            min_ticks_for_tp2 = 3
+            min_ticks_for_tp3 = 4
+            print(f"[DEBUG] {stock_name}: Using Day Trader settings. SL: 2%, TP Ticks: 2,3,4")
+        else: # Default to Swing Trader
+            stop_loss_percentage = 0.95  # 5% stop loss for Swing Trader
+            min_ticks_separation = 3 # Default for TP1
+            min_ticks_for_tp2 = 5 # Specific for TP2
+            min_ticks_for_tp3 = 7 # Specific for TP3
+            print(f"[DEBUG] {stock_name}: Using Swing Trader settings. SL: 5%, TP Ticks: 3,5,7")
+
+        stop_loss_val_raw = stop_loss_calculation_base * stop_loss_percentage
         stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
 
         # New TP logic using potential_tp_levels_from_history, then adjust them
         tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
-        min_ticks_separation = 3 # Default for TP1
+        # min_ticks_separation = 3 # Default for TP1 # Moved up
         tp_levels_raw = potential_tp_levels_from_history # Sorted list of floats
         current_search_start_index = 0
 
@@ -83,7 +97,7 @@ def generate_plans_for_stocks(selected_stocks_details):
 
         # Find TP2
         if tp1_val_adj is not None and potential_tp_levels_from_history: # Ensure TP1 was found and history exists
-            min_ticks_for_tp2 = 5 # Specific for TP2
+            # min_ticks_for_tp2 = 5 # Specific for TP2 # Moved up
             calculated_min_target_tp2 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_for_tp2) # base is tp1_val_adj
             print(f"[DEBUG] {stock_name}: TP2: Min target value based on TP1 '{base_for_next_tp_min_target}' + {min_ticks_for_tp2} ticks = {calculated_min_target_tp2}")
             raw_tp2_found_at_index = -1
@@ -103,7 +117,7 @@ def generate_plans_for_stocks(selected_stocks_details):
 
         # Find TP3
         if tp2_val_adj is not None and potential_tp_levels_from_history: # Ensure TP2 was found and history exists
-            min_ticks_for_tp3 = 7 # Specific for TP3
+            # min_ticks_for_tp3 = 7 # Specific for TP3 # Moved up
             calculated_min_target_tp3 = add_ticks_to_price(base_for_next_tp_min_target, min_ticks_for_tp3) # base is tp2_val_adj
             print(f"[DEBUG] {stock_name}: TP3: Min target value based on TP2 '{base_for_next_tp_min_target}' + {min_ticks_for_tp3} ticks = {calculated_min_target_tp3}")
             for i in range(current_search_start_index, len(tp_levels_raw)):

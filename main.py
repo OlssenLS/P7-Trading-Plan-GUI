@@ -252,6 +252,14 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ori
         chk.pack(anchor=W, pady=2) # Added pady=2 for spacing
         selected_stocks_vars[stock_name] = var
 
+    # Plan Type Selection
+    plan_type_frame = ttk.Frame(main_frame)
+    plan_type_frame.pack(fill=X, pady=(10, 5))
+    ttk.Label(plan_type_frame, text="Select Plan Type:", font=("Helvetica", 10)).pack(side=LEFT, padx=(0, 5))
+    plan_type_var = ttk.StringVar(value="Swing Trader") # Default value
+    plan_type_combo = ttk.Combobox(plan_type_frame, textvariable=plan_type_var, values=["Swing Trader", "Day Trader"], state="readonly")
+    plan_type_combo.pack(side=LEFT, fill=X, expand=True)
+
     button_frame = ttk.Frame(main_frame)
     button_frame.pack(fill=X, pady=(10, 0))
 
@@ -282,7 +290,8 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ori
             return
 
         # Call the placeholder algorithm
-        generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan)
+        selected_plan_type = plan_type_var.get() # Get selected plan type
+        generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan, plan_type=selected_plan_type)
         
         # Open the new window showing generated plans
         # The original plan_window will be closed by show_generated_plans_window
