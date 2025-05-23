@@ -1,3 +1,7 @@
 ttkbootstrap
 pandas
 pyinstaller
+requests
+matplotlib
+mplfinance
+Pillow

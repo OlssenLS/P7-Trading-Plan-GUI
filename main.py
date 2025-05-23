@@ -4,9 +4,18 @@ import threading
 import requests
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from tkinter import simpledialog # For asking risk percentage
+import io # For handling image data in memory
+
+# Charting imports
+import matplotlib
+matplotlib.use("TkAgg") # Advised for Tkinter compatibility
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import mplfinance as mpf
+from PIL import Image, ImageTk # For displaying chart in Tkinter
 
 # Import from the new module
 from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
@@ -295,6 +304,100 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     generate_plan_button.config(command=generate_plan_for_selected_action)
 
 
+def generate_candlestick_chart(stock_symbol, parent_tk_frame):
+    """
+    Generates a candlestick chart for the given stock symbol for the last 6 months
+    and embeds it into the parent_tk_frame.
+    Returns the FigureCanvasTkAgg widget or None.
+    """
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=180) # Approx 6 months
+        
+        api_url = f"https://yfinance-web-indonesia-data.vercel.app/api/stocks/{stock_symbol}?start_date={start_date.strftime('%Y-%m-%d')}&end_date={end_date.strftime('%Y-%m-%d')}"
+        response = requests.get(api_url, timeout=15)
+        response.raise_for_status()
+        stock_data = response.json()
+
+        if not stock_data or "historical_data" not in stock_data or not stock_data["historical_data"]:
+            print(f"No historical data for {stock_symbol} for chart.")
+            return None
+
+        df = pd.DataFrame(stock_data["historical_data"])
+        if df.empty:
+            print(f"DataFrame empty for {stock_symbol}.")
+            return None
+
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
+        df = df.astype(float)
+
+        # Custom mplfinance style
+        mc = mpf.make_marketcolors(up='#00ff00', down='#ff0000', inherit=True)
+        s = mpf.make_mpf_style(base_mpf_style='nightclouds', marketcolors=mc,
+                               figcolor='k', facecolor='k',
+                               rc={'xtick.labelsize': 0, 'ytick.labelsize': 8, 
+                                   'axes.titlesize': 10, 'axes.labelsize': 8,
+                                   'xtick.color':'k', 'axes.labelcolor':'lightgray',
+                                   'axes.edgecolor':'gray', 'axes.titlecolor':'lightgray', 
+                                   'ytick.color':'lightgray', 'axes.facecolor':'k'})
+
+        # Create a Matplotlib figure and add an Axes to it
+        # The figure size will be controlled by the Tkinter layout (pack with expand=True, fill=BOTH)
+        fig = plt.Figure(facecolor='k') # Ensure figure background is black
+        
+        # Create a 2-row, 1-column GridSpec for price and volume
+        # Price chart takes 3 parts, volume takes 1 part of the height
+        gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1], hspace=0.0)
+        ax_price = fig.add_subplot(gs[0,0], facecolor='k')
+        ax_volume = fig.add_subplot(gs[1,0], facecolor='k', sharex=ax_price) # Share x-axis with price
+
+        # Plot using mplfinance on the created Axes
+        mpf.plot(df, type='candle', style=s, 
+                 ax=ax_price,         # Main price chart on ax_price
+                 volume=ax_volume,    # Volume chart on ax_volume
+                 show_nontrading=False,
+                )
+        
+        # Explicitly remove x-axis labels and ticks from the price axes
+        ax_price.set_xticklabels([])
+        ax_price.set_xticks([])
+        ax_price.set_xlabel('')
+        # ax_price.tick_params(axis='x', colors='k') # Also hide tick marks themselves if needed
+
+        # Explicitly remove x-axis labels and ticks from the volume axes
+        ax_volume.set_xticklabels([])
+        ax_volume.set_xticks([])
+        ax_volume.set_xlabel('')
+        # ax_volume.tick_params(axis='x', colors='k')
+        
+        ax_price.yaxis.label.set_color('lightgray')
+        # ax_price.title.set_color('lightgray') # Title is handled by fig.suptitle
+        ax_volume.yaxis.label.set_color('lightgray')
+
+        fig.suptitle(f"{stock_symbol} - Last 6 Months", color='lightgray', fontsize=10)
+        # fig.subplots_adjust(bottom=0.05, top=0.9, hspace=0.0) # hspace controlled by gridspec
+        fig.subplots_adjust(bottom=0.05, top=0.92) # Adjust top for suptitle
+
+        canvas = FigureCanvasTkAgg(fig, master=parent_tk_frame)
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.pack(side=TOP, fill=BOTH, expand=True) # Make canvas fill and expand
+        canvas.draw()
+
+        return canvas # Return the canvas object to be stored and destroyed later
+
+    except requests.exceptions.RequestException as e:
+        print(f"API request error for {stock_symbol} chart: {e}")
+        return None
+    except Exception as e:
+        print(f"Error generating candlestick chart for {stock_symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_stocks, summary_text_original, final_status_original, original_completion_callback, original_set_continue_button_state_callback, original_shared_detected_stocks_list_ref):
     
     confirmed_stocks_accumulator = [] # Accumulates stocks confirmed with "Yes"
@@ -335,18 +438,27 @@ def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_
 
         confirmation_dialog = ttk.Toplevel(parent_window_for_dialogs) # Use parent from outer scope
         confirmation_dialog.title(f"Confirm Trend Line: {stock_name}")
-        confirmation_dialog.geometry("500x350") # Smaller window for single stock
+        confirmation_dialog.geometry("1280x720") # Smaller window for single stock
         confirmation_dialog.transient(parent_window_for_dialogs)
         confirmation_dialog.grab_set()
-        confirmation_dialog.resizable(False, False)
+        confirmation_dialog.resizable(True, True)
 
         dialog_main_frame = ttk.Frame(confirmation_dialog, padding=15)
         dialog_main_frame.pack(fill=BOTH, expand=True)
 
-        ttk.Label(dialog_main_frame, text=f"Stock: {stock_name}", font=("Helvetica", 14, "bold")).pack(pady=(0,10))
+        ttk.Label(dialog_main_frame, text=f"Stock: {stock_name}", font=("Helvetica", 14, "bold")).pack(pady=(0,10), side=TOP)
         
-        chart_placeholder = ttk.Label(dialog_main_frame, text=f"[Chart for {stock_name} with trend lines here]")
-        chart_placeholder.pack(pady=10, fill=BOTH, expand=True)
+        # Frame for the chart to allow it to expand
+        chart_frame = ttk.Frame(dialog_main_frame)
+        chart_frame.pack(pady=10, fill=BOTH, expand=True, side=TOP)
+
+        # Generate and display chart
+        # Store the canvas object to destroy it later if window is remade or closed
+        chart_canvas_obj = generate_candlestick_chart(stock_name, chart_frame)
+        
+        if not chart_canvas_obj:
+            error_label = ttk.Label(chart_frame, text=f"Could not load chart for {stock_name}.", foreground="red")
+            error_label.pack(pady=10, fill=BOTH, expand=True)
 
         buttons_frame = ttk.Frame(dialog_main_frame)
         buttons_frame.pack(fill=X, pady=(10,0))
