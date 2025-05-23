@@ -11,7 +11,7 @@ from tkinter import simpledialog # For asking risk percentage
 # Import from the new module
 from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
 from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder # Import new functions
-from filterManager import FilterManager
+from filterManager import FilterManager # Added import
 
 # Get the script directory for file paths - This SCRIPT_DIR is for main.py specific paths if any.
 # The breakHighPriceDetection module manages its own SCRIPT_DIR for its file operations.
@@ -208,7 +208,7 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     if original_plan_window and original_plan_window.winfo_exists():
         original_plan_window.destroy()
 
-def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, original_screener_window=None):
+def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, initial_plan_type="Swing Trader", plan_type_disabled=False, original_screener_window=None):
     """Open a new window to select stocks for trading plan generation."""
     # Close the screener window if it exists and is passed
     if original_screener_window and original_screener_window.winfo_exists():
@@ -248,9 +248,12 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ori
     plan_type_frame = ttk.Frame(main_frame)
     plan_type_frame.pack(fill=X, pady=(10, 5))
     ttk.Label(plan_type_frame, text="Select Plan Type:", font=("Helvetica", 10)).pack(side=LEFT, padx=(0, 5))
-    plan_type_var = ttk.StringVar(value="Swing Trader") # Default value
+    plan_type_var = ttk.StringVar(value=initial_plan_type) # Use initial_plan_type
     plan_type_combo = ttk.Combobox(plan_type_frame, textvariable=plan_type_var, values=["Swing Trader", "Day Trader"], state="readonly")
     plan_type_combo.pack(side=LEFT, fill=X, expand=True)
+
+    if plan_type_disabled:
+        plan_type_combo.config(state=DISABLED)
 
     button_frame = ttk.Frame(main_frame)
     button_frame.pack(fill=X, pady=(10, 0))
@@ -293,50 +296,58 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ori
 
 def open_generator_window():
     """Open a new window for the generator"""
-    generator_window = ttk.Toplevel(title="Stock Screener")
-    generator_window.geometry("600x600")
-    
-    # Create a frame for all filters
-    filters_frame = ttk.Frame(generator_window)
-    filters_frame.pack(fill=X, padx=20, pady=20)
-    
-    # Initialize the filter manager
-    filter_manager = FilterManager(filters_frame)
-    
-    # Button frame
-    button_frame = ttk.Frame(generator_window)
-    button_frame.pack(fill=X, padx=20, pady=(0, 10))
-    
-    # Results frame
-    results_frame = ttk.Frame(generator_window)
-    results_frame.pack(fill=BOTH, expand=True, padx=20, pady=(0, 20))
-    
-    # Results text area
-    result_text = ttk.Text(results_frame, wrap=WORD, height=15)
+    generator_window = ttk.Toplevel(title="Stocks Filter System") # Changed title
+    generator_window.geometry("700x650") # Adjusted size for FilterManager and results
+    # generator_window.transient(root) # Keep window on top
+    # generator_window.grab_set() # Make modal
+
+    main_gen_frame = ttk.Frame(generator_window, padding=10)
+    main_gen_frame.pack(fill=BOTH, expand=True)
+
+    filters_panel_frame = ttk.Frame(main_gen_frame)
+    filters_panel_frame.pack(fill=X, pady=(0, 10))
+    ttk.Label(filters_panel_frame, text="Select Filter Options:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,5))
+    filter_manager = FilterManager(filters_panel_frame)
+
+    shared_detected_stocks_list = []
+    plan_type_config = {"type": "Swing Trader", "disabled": False}
+
+    def set_plan_type_config_callback(plan_type_from_detection, disable_selection_from_detection):
+        plan_type_config["type"] = plan_type_from_detection if plan_type_from_detection else "Swing Trader"
+        plan_type_config["disabled"] = disable_selection_from_detection
+        # print(f"Debug: Plan type config updated by callback: {plan_type_config}")
+
+
+    results_display_frame = ttk.Frame(main_gen_frame)
+    results_display_frame.pack(fill=BOTH, expand=True, pady=(0, 10))
+    result_text = ttk.Text(results_display_frame, wrap=WORD, height=10) # Adjusted height
     result_text.pack(fill=BOTH, expand=True, side=LEFT)
-    
-    # Scrollbar
-    scrollbar = ttk.Scrollbar(results_frame, command=result_text.yview)
+    scrollbar = ttk.Scrollbar(results_display_frame, command=result_text.yview)
     scrollbar.pack(fill=Y, side=RIGHT)
     result_text.config(yscrollcommand=scrollbar.set)
-    
-    # Shared list for detected stocks to be passed to the trading plan window
-    shared_detected_stocks_list = []
 
-    # Continue button (initially disabled)
+    action_buttons_frame = ttk.Frame(main_gen_frame)
+    action_buttons_frame.pack(fill=X, pady=(10,0))
+    
     continue_button = ttk.Button(
-        button_frame,
+        action_buttons_frame,
         text="Continue to Plan Setup",
         bootstyle="info",
         state=DISABLED,
-        command=lambda: open_trading_plan_window(generator_window, shared_detected_stocks_list)
+        command=lambda: open_trading_plan_window(
+            parent_window=generator_window.master, 
+            stocks_for_plan_generation_data=shared_detected_stocks_list,
+            initial_plan_type=plan_type_config["type"],
+            plan_type_disabled=plan_type_config["disabled"],
+            original_screener_window=None # Do not pass generator_window here to keep it open
+        )
     )
-    
-    # Callback implementations for detect_break_high_price
+
     def progress_callback_impl(message):
         if result_text.winfo_exists():
+            # Ensure UI updates happen on the main thread
             root.after(0, lambda: (
-                result_text.insert(END, message), 
+                result_text.insert(END, message + "\n"), # Add newline for readability
                 result_text.see(END)
             ))
 
@@ -353,25 +364,32 @@ def open_generator_window():
         if continue_button.winfo_exists():
             root.after(0, lambda: continue_button.config(state=NORMAL if enable else DISABLED))
 
-    # Run button
+    def on_run_detection():
+        if filter_manager.is_valid_selection():
+            selected_filters = filter_manager.get_selected_filters()
+            # print(f"Debug: Running detection with filters: {selected_filters}") # For debugging
+            threading.Thread(
+                target=detect_break_high_price,
+                args=(
+                    selected_filters,
+                    shared_detected_stocks_list,
+                    progress_callback_impl,
+                    completion_callback_impl,
+                    set_continue_button_state_impl,
+                    set_plan_type_config_callback # Pass the new callback
+                ),
+                daemon=True
+            ).start()
+        else:
+            progress_callback_impl("Error: At least one Break High Price filter must be selected.")
+
     run_button = ttk.Button(
-        button_frame, 
+        action_buttons_frame, 
         text="Run Detection", 
         bootstyle="success",
-        command=lambda: threading.Thread(
-            target=detect_break_high_price,
-            args=(
-                filter_manager.get_selected_filters(),
-                shared_detected_stocks_list,
-                progress_callback_impl,
-                completion_callback_impl,
-                set_continue_button_state_impl
-            ),
-            daemon=True
-        ).start()
+        command=on_run_detection
     )
     run_button.pack(side=LEFT, padx=5)
-    
     continue_button.pack(side=LEFT, padx=5)
 
 def show_main_page():

@@ -41,6 +41,7 @@ STOCKS_FILE = resource_path("stocks.txt")
 DATA_DIR = get_persistent_data_path("data") # Ensures data directory is found/created next to exe/script
 
 DETECTION_HISTORY_FILE = os.path.join(DATA_DIR, "detection_history.json")
+KEEP_1D_BREAK_DAYS = 1  # Only keep for the current day
 KEEP_5D_BREAK_DAYS = 3
 KEEP_1M_BREAK_DAYS = 5
 KEEP_2M_BREAK_DAYS = 6
@@ -139,6 +140,25 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                 high_prices_for_stock_output = {}
 
                 stock_hist_today = current_date_history.get(stock, {})
+
+                # Break 1d high (yesterday's high)
+                if options["1_day"] and len(df) >= 2:
+                    is_new_break_1d = False
+                    yesterday_high = df.iloc[-2]["high"]
+                    if latest_high_of_day > yesterday_high:
+                        is_new_break_1d = True
+                        break_types_for_history["1d_break_date"] = latest_date_str
+                        high_prices_for_stock_output["1d"] = yesterday_high
+                        break_reasons.append("1 Day High (New Break)")
+                    elif "1d_break_date" in stock_hist_today:
+                        hist_break_date = datetime.strptime(stock_hist_today["1d_break_date"], "%Y-%m-%d").date()
+                        days_since = (latest_date_df.date() - hist_break_date).days
+                        if 0 <= days_since <= KEEP_1D_BREAK_DAYS:
+                            broke_high = True
+                            break_types_for_history["1d_break_date"] = stock_hist_today["1d_break_date"]
+                            break_types_for_history["1d_days_since"] = days_since
+                            high_prices_for_stock_output["1d"] = stock_hist_today.get("high_prices",{}).get("1d", yesterday_high)
+                            break_reasons.append(f"1 Day High (Day {days_since} of {KEEP_1D_BREAK_DAYS})")
 
                 # 5-day high
                 if options["5_days"] and len(df) >= 6:
@@ -255,7 +275,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
     except Exception as e:
         return stock, None, f"Error processing {stock}: {str(e)}"
 
-def detect_break_high_price(filters, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback):
+def detect_break_high_price(filters, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback, set_plan_type_callback):
     """Detect break high price based on selected filters and update UI via callbacks."""
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     
@@ -267,6 +287,18 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, co
     
     break_high_options = filters.get('break_high', {})
     technical_options = filters.get('technical', {})
+    
+    # Check if only 1-day break is selected
+    only_1d_break = (break_high_options.get("1_day", False) and 
+                    not any(break_high_options.get(option, False) 
+                           for option in ["5_days", "1_month", "2_months", "3_months"]))
+    
+    if only_1d_break:
+        # Lock plan type to Day Trade
+        set_plan_type_callback("Day Trade", True)
+    else:
+        # Default to Swing Trader, enable selection
+        set_plan_type_callback("Swing Trader", False)
     
     if not any(break_high_options.values()):
         progress_callback("Please select at least one Break High Price filter.\n")
@@ -304,7 +336,13 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, co
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_stock = {executor.submit(fetch_and_process_stock_data, 
                                            stock, 
-                                           break_high_options, 
+                                           {
+                                               "1_day": break_high_options.get("1_day", False),
+                                               "5_days": break_high_options.get("5_days", False),
+                                               "1_month": break_high_options.get("1_month", False),
+                                               "2_months": break_high_options.get("2_months", False),
+                                               "3_months": break_high_options.get("3_months", False)
+                                           }, 
                                            base_url, 
                                            detection_history.get(current_date_str, {}),
                                            latest_date_for_run_dt):

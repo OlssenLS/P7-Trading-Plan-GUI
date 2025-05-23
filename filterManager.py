@@ -16,6 +16,7 @@ class FilterManager:
 
         # Break High Price options
         break_high_options = {
+            "1_day": "1 Day High Price",
             "5_days": "5 Days High Price",
             "1_month": "1 Month High Price",
             "2_months": "2 Months High Price",
