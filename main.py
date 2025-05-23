@@ -59,7 +59,7 @@ def load_plans_from_file():
     except (IOError, json.JSONDecodeError) as e:
         print(f"Error loading plans from {SAVED_PLANS_FILE}: {e}")
         # Optionally inform user, but for now, just return empty list
-        # simpledialog.messagebox.showwarning("Load Error", f"Could not load plans: {e}\\nStarting with no saved plans.", parent=root)
+        # simpledialog.messagebox.showwarning("Load Error", f"Could not load plans: {e}\nStarting with no saved plans.", parent=root)
         # To prevent data loss on next save if file was corrupt, could rename/backup here
         return []
 
@@ -294,6 +294,96 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
 
     generate_plan_button.config(command=generate_plan_for_selected_action)
 
+
+def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_stocks, summary_text_original, final_status_original, original_completion_callback, original_set_continue_button_state_callback, original_shared_detected_stocks_list_ref):
+    
+    confirmed_stocks_accumulator = [] # Accumulates stocks confirmed with "Yes"
+    # Make a copy of the list to process, as we'll be removing items
+    stocks_to_review = list(all_detected_stocks) 
+
+    def _show_next_stock_confirmation(current_stock_list_to_review):
+        if not current_stock_list_to_review:
+            # All stocks have been reviewed
+            original_shared_detected_stocks_list_ref.clear()
+            original_shared_detected_stocks_list_ref.extend(confirmed_stocks_accumulator)
+
+            num_confirmed = len(confirmed_stocks_accumulator)
+            num_total_detected = len(all_detected_stocks)
+            
+            updated_summary_text = f"Trend Line Review Complete. {num_confirmed} of {num_total_detected} stocks confirmed for plan generation.\n\n"
+            # Add details of confirmed stocks to summary if desired
+            if confirmed_stocks_accumulator:
+                updated_summary_text += "Confirmed Stocks:\n"
+                for stock_data in confirmed_stocks_accumulator:
+                    updated_summary_text += f"- {stock_data[0]}\n"
+            
+            updated_final_status = f"Proceeding with {num_confirmed} confirmed stocks."
+            if num_confirmed == 0:
+                updated_final_status = "No stocks were confirmed after trend line review. No plans will be generated."
+
+            original_completion_callback(confirmed_stocks_accumulator, updated_summary_text, updated_final_status)
+            
+            if confirmed_stocks_accumulator: 
+                original_set_continue_button_state_callback(True)
+            else:
+                original_set_continue_button_state_callback(False)
+            return
+
+        # Get the next stock to review
+        stock_to_confirm = current_stock_list_to_review.pop(0) # Get and remove the first item
+        stock_name = stock_to_confirm[0]
+
+        confirmation_dialog = ttk.Toplevel(parent_window_for_dialogs) # Use parent from outer scope
+        confirmation_dialog.title(f"Confirm Trend Line: {stock_name}")
+        confirmation_dialog.geometry("500x350") # Smaller window for single stock
+        confirmation_dialog.transient(parent_window_for_dialogs)
+        confirmation_dialog.grab_set()
+        confirmation_dialog.resizable(False, False)
+
+        dialog_main_frame = ttk.Frame(confirmation_dialog, padding=15)
+        dialog_main_frame.pack(fill=BOTH, expand=True)
+
+        ttk.Label(dialog_main_frame, text=f"Stock: {stock_name}", font=("Helvetica", 14, "bold")).pack(pady=(0,10))
+        
+        chart_placeholder = ttk.Label(dialog_main_frame, text=f"[Chart for {stock_name} with trend lines here]")
+        chart_placeholder.pack(pady=10, fill=BOTH, expand=True)
+
+        buttons_frame = ttk.Frame(dialog_main_frame)
+        buttons_frame.pack(fill=X, pady=(10,0))
+
+        def handle_decision(confirmed_this_stock):
+            if confirmed_this_stock:
+                confirmed_stocks_accumulator.append(stock_to_confirm)
+                print(f"DEBUG: {stock_name} confirmed YES.")
+            else:
+                print(f"DEBUG: {stock_name} confirmed NO.")
+            
+            confirmation_dialog.destroy()
+            _show_next_stock_confirmation(current_stock_list_to_review) # Process next stock
+
+        no_button = ttk.Button(buttons_frame, text="No (Exclude)", bootstyle="danger", command=lambda: handle_decision(False))
+        no_button.pack(side=RIGHT, padx=10)
+
+        yes_button = ttk.Button(buttons_frame, text="Yes (Include)", bootstyle="success", command=lambda: handle_decision(True))
+        yes_button.pack(side=RIGHT, padx=10)
+        
+        # Center the window
+        confirmation_dialog.update_idletasks()
+        x = parent_window_for_dialogs.winfo_x() + (parent_window_for_dialogs.winfo_width() // 2) - (confirmation_dialog.winfo_width() // 2)
+        y = parent_window_for_dialogs.winfo_y() + (parent_window_for_dialogs.winfo_height() // 2) - (confirmation_dialog.winfo_height() // 2)
+        confirmation_dialog.geometry(f"+{x}+{y}")
+        confirmation_dialog.focus_set() # Ensure it has focus
+
+    # Initial call to start the sequential confirmation process
+    if not all_detected_stocks: # If no stocks were detected initially
+        original_shared_detected_stocks_list_ref.clear()
+        original_completion_callback([], "No stocks were initially detected for trend line confirmation.", "No action taken.")
+        original_set_continue_button_state_callback(False)
+        return
+        
+    _show_next_stock_confirmation(stocks_to_review)
+
+
 def open_generator_window():
     """Open a new window for the generator"""
     generator_window = ttk.Toplevel(title="Stocks Filter System") # Changed title
@@ -339,15 +429,14 @@ def open_generator_window():
             stocks_for_plan_generation_data=shared_detected_stocks_list,
             initial_plan_type=plan_type_config["type"],
             plan_type_disabled=plan_type_config["disabled"],
-            original_screener_window=None # Do not pass generator_window here to keep it open
+            original_screener_window=None 
         )
     )
 
     def progress_callback_impl(message):
         if result_text.winfo_exists():
-            # Ensure UI updates happen on the main thread
             root.after(0, lambda: (
-                result_text.insert(END, message + "\n"), # Add newline for readability
+                result_text.insert(END, message + "\n"), 
                 result_text.see(END)
             ))
 
@@ -364,19 +453,43 @@ def open_generator_window():
         if continue_button.winfo_exists():
             root.after(0, lambda: continue_button.config(state=NORMAL if enable else DISABLED))
 
+    def post_detection_callback_impl(detected_stocks_summary_data, summary_text, final_status, trend_line_confirmation_needed):
+        if trend_line_confirmation_needed:
+            open_trend_line_confirmation_window(
+                generator_window, 
+                detected_stocks_summary_data, 
+                summary_text, 
+                final_status, 
+                completion_callback_impl, 
+                set_continue_button_state_impl, 
+                shared_detected_stocks_list
+            )
+        else:
+            completion_callback_impl(detected_stocks_summary_data, summary_text, final_status)
+            if detected_stocks_summary_data:
+                set_continue_button_state_impl(True)
+            else:
+                set_continue_button_state_impl(False)
+
     def on_run_detection():
         if filter_manager.is_valid_selection():
             selected_filters = filter_manager.get_selected_filters()
-            # print(f"Debug: Running detection with filters: {selected_filters}") # For debugging
+            trend_line_confirmation_selected = selected_filters.get("trend_line_confirmation", False)
+            
+            if result_text.winfo_exists():
+                result_text.delete(1.0, END)
+            set_continue_button_state_impl(False) 
+            shared_detected_stocks_list.clear() 
+
             threading.Thread(
                 target=detect_break_high_price,
                 args=(
                     selected_filters,
-                    shared_detected_stocks_list,
+                    shared_detected_stocks_list, 
                     progress_callback_impl,
-                    completion_callback_impl,
-                    set_continue_button_state_impl,
-                    set_plan_type_config_callback # Pass the new callback
+                    post_detection_callback_impl, 
+                    set_plan_type_config_callback,
+                    trend_line_confirmation_selected
                 ),
                 daemon=True
             ).start()
@@ -391,6 +504,7 @@ def open_generator_window():
     )
     run_button.pack(side=LEFT, padx=5)
     continue_button.pack(side=LEFT, padx=5)
+
 
 def show_main_page():
     global main_plan_display_treeview # Declare global to assign

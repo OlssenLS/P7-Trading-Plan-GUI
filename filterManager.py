@@ -7,6 +7,7 @@ class FilterManager:
         self.break_high_vars = {}
         self.technical_vars = {}
         self.technical_frames = []
+        self.trend_line_confirmation_var = ttk.BooleanVar(value=False)
         self.setup_filters()
 
     def setup_filters(self):
@@ -49,6 +50,17 @@ class FilterManager:
             chk.pack(anchor=W, pady=2)
             self.technical_frames.append(chk)
 
+        # Trend Line Confirmation Section
+        trend_line_frame = ttk.LabelFrame(self.parent_frame, text="Manual Confirmation", padding=10)
+        trend_line_frame.pack(fill=X, padx=10, pady=5)
+
+        self.trend_line_chk = ttk.Checkbutton(
+            trend_line_frame,
+            text="Include Trend Line Confirmation",
+            variable=self.trend_line_confirmation_var,
+        )
+        self.trend_line_chk.pack(anchor=W, pady=2)
+
     def on_break_high_change(self):
         """Enable/disable technical indicators based on Break High Price selection"""
         any_break_high_selected = any(var.get() for var in self.break_high_vars.values())
@@ -61,7 +73,8 @@ class FilterManager:
         """Returns a dictionary of all selected filters"""
         filters = {
             "break_high": {k: v.get() for k, v in self.break_high_vars.items()},
-            "technical": {k: v.get() for k, v in self.technical_vars.items()}
+            "technical": {k: v.get() for k, v in self.technical_vars.items()},
+            "trend_line_confirmation": self.trend_line_confirmation_var.get()
         }
         return filters
 

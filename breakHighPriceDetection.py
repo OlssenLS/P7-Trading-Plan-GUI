@@ -275,7 +275,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
     except Exception as e:
         return stock, None, f"Error processing {stock}: {str(e)}"
 
-def detect_break_high_price(filters, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback, set_plan_type_callback):
+def detect_break_high_price(filters, output_list_for_plan, progress_callback, post_detection_callback, set_plan_type_callback, trend_line_confirmation_enabled):
     """Detect break high price based on selected filters and update UI via callbacks."""
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     
@@ -283,7 +283,6 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, co
     stocks = get_stock_list()
     
     output_list_for_plan.clear()
-    set_continue_button_state_callback(False)
     
     break_high_options = filters.get('break_high', {})
     technical_options = filters.get('technical', {})
@@ -302,14 +301,14 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, co
     
     if not any(break_high_options.values()):
         progress_callback("Please select at least one Break High Price filter.\n")
-        completion_callback([], "Please select at least one Break High Price filter.\n", "")
+        post_detection_callback([], "Please select at least one Break High Price filter.\n", "", False)
         return
     
     progress_callback("Starting detection (using threads)...\n")
     if not stocks:
         message = "Stock list is empty. Please check stocks.txt.\n"
         progress_callback(message)
-        completion_callback([], message, "Detection aborted.")
+        post_detection_callback([], message, "Detection aborted.", False)
         return
     
     progress_callback(f"Total stocks to check: {len(stocks)}\n")
@@ -421,7 +420,11 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, co
     
     final_status_message = f"\nDetection complete. Found {len(detected_stocks_for_processing)} stocks meeting all criteria.\n"
     
-    completion_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message)
+    if trend_line_confirmation_enabled and detected_stocks_for_processing:
+        progress_callback("Trend line confirmation step required. Stocks will be shown for manual review.\n")
+        # Call the post_detection_callback, indicating trend line confirmation is needed.
+        post_detection_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message, True)
 
-    if detected_stocks_for_processing:
-        set_continue_button_state_callback(True) 
+    else:
+        # Original behavior: call post_detection_callback, indicating no trend line confirmation needed.
+        post_detection_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message, False) 
