@@ -4,13 +4,42 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 import concurrent.futures # Added for threading
+import sys # Added for PyInstaller path handling
+from technicalIndicators import apply_technical_filters, get_technical_analysis_summary
 
-# Get the script directory for file paths
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Helper function to get correct path for bundled read-only resources
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Not running in a PyInstaller bundle, use script's directory
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
-# Constants for data paths and break tracking
-DATA_DIR = os.path.join(SCRIPT_DIR, "data")
-STOCKS_FILE = os.path.join(SCRIPT_DIR, "stocks.txt")
+# Helper function to get path for persistent data (next to exe or script)
+def get_application_path():
+    """Returns the base application path."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running in a PyInstaller bundle
+        return os.path.dirname(sys.executable)
+    else:
+        # Running in a normal Python environment
+        return os.path.dirname(os.path.abspath(__file__))
+
+def get_persistent_data_path(relative_path):
+    """ Get absolute path for persistent data storage. """
+    base_path = get_application_path()
+    return os.path.join(base_path, relative_path)
+
+# Get the script directory for file paths - Original, keep for reference or other uses if needed.
+# SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Constants for data paths and break tracking using resource_path
+STOCKS_FILE = resource_path("stocks.txt")
+DATA_DIR = get_persistent_data_path("data") # Ensures data directory is found/created next to exe/script
+
 DETECTION_HISTORY_FILE = os.path.join(DATA_DIR, "detection_history.json")
 KEEP_5D_BREAK_DAYS = 3
 KEEP_1M_BREAK_DAYS = 5
@@ -18,25 +47,32 @@ KEEP_2M_BREAK_DAYS = 6
 KEEP_3M_BREAK_DAYS = 7
 
 def get_stock_list():
-    """Read stock list from stocks.txt"""
+    """Read stock list from stocks.txt or use default if not found."""
     stock_list = []
-    try:
-        # Ensure data directory exists, as STOCKS_FILE is within SCRIPT_DIR but related to data logic
-        os.makedirs(DATA_DIR, exist_ok=True)
-        if not os.path.exists(STOCKS_FILE):
-             # Create a default stocks.txt if it doesn't exist, useful if app is run directly
-            default_stocks = [
-                "BBCA", "BBRI", "BMRI", "TLKM", "ASII",
-                "UNVR", "INDF", "ICBP", "SMGR", "CPIN"
-            ]
-            with open(STOCKS_FILE, "w") as f:
-                f.write("\n".join(default_stocks))
-            print(f"Created default stocks.txt at {STOCKS_FILE}")
+    default_stocks_list = [
+        "BBCA", "BBRI", "BMRI", "TLKM", "ASII",
+        "UNVR", "INDF", "ICBP", "SMGR", "CPIN"
+    ]
 
-        with open(STOCKS_FILE, "r") as f:
-            stock_list = [line.strip() for line in f.readlines() if line.strip()]
+    try:
+        # Ensure data directory exists (though STOCKS_FILE is not in DATA_DIR with resource_path)
+        # This call here might be for other reasons, or could be re-evaluated if solely for STOCKS_FILE.
+        # For now, keeping os.makedirs(DATA_DIR, exist_ok=True) as it might be used by other logic in this file.
+        os.makedirs(DATA_DIR, exist_ok=True) 
+
+        if os.path.exists(STOCKS_FILE):
+            with open(STOCKS_FILE, "r") as f:
+                stock_list = [line.strip() for line in f.readlines() if line.strip()]
+            if not stock_list:
+                print(f"Warning: {STOCKS_FILE} was found but is empty. Using default stock list.")
+                stock_list = default_stocks_list
+        else:
+            print(f"Warning: {STOCKS_FILE} not found. Using default stock list. Ensure it is added via PyInstaller's --add-data.")
+            stock_list = default_stocks_list
+            
     except Exception as e:
-        print(f"Error reading or creating stocks.txt: {e}")
+        print(f"Error reading {STOCKS_FILE}: {e}. Using default stock list.")
+        stock_list = default_stocks_list
     return stock_list
 
 def load_detection_history():
@@ -71,29 +107,12 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
         if response.status_code == 200:
             data = response.json()
             if isinstance(data, dict) and "historical_data" in data and data["historical_data"] and len(data["historical_data"]) > 0:
-                # DEBUG: Log API response details
-                print(f"[DEBUG] {stock}: API returned {len(data['historical_data'])} data points")
-                
-                # Check the earliest and latest dates in the API response
-                try:
-                    dates = [item.get('date') for item in data['historical_data'] if 'date' in item]
-                    if dates:
-                        earliest_date = min(dates)
-                        latest_date = max(dates)
-                        print(f"[DEBUG] {stock}: Date range in API data: {earliest_date} to {latest_date}")
-                    # Log a sample data point to verify structure
-                    if data['historical_data']:
-                        sample_point = data['historical_data'][0]
-                        print(f"[DEBUG] {stock}: Sample data structure: {sample_point}")
-                except Exception as e:
-                    print(f"[DEBUG] {stock}: Error parsing API dates: {e}")
-                
+                # Convert to DataFrame and process
                 df = pd.DataFrame(data["historical_data"])
                 df["date"] = pd.to_datetime(df["date"])
                 df = df.sort_values("date")
                 
                 if df.empty:
-                    # progress_callback(f"  No historical data rows for {stock} after processing.\n")
                     return stock, None, f"No historical data for {stock}."
 
                 latest_close = df.iloc[-1]["close"]
@@ -104,42 +123,20 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
 
                 # Find potential TP levels from historical highs > latest_high_of_day
                 potential_tp_levels_from_history = []
-                if not df.empty and len(df) > 1: # Ensure there's historical data to check against
-                    # Exclude the most recent day's high since TPs should be above it.
-                    # We consider all highs from days *before* the latest_date_df.
+                if not df.empty and len(df) > 1:
                     historical_data_for_tp_search = df[df["date"] < latest_date_df]
-                    
-                    # DEBUG: Log historical data stats
-                    print(f"[DEBUG] {stock}: Total historical days: {len(df)}, Days before latest: {len(historical_data_for_tp_search)}")
-                    print(f"[DEBUG] {stock}: Latest high: {latest_high_of_day:.2f}, Latest date: {latest_date_str}")
                     
                     if not historical_data_for_tp_search.empty:
                         historical_highs_values = historical_data_for_tp_search["high"]
                         higher_historical_highs = historical_highs_values[historical_highs_values > latest_high_of_day]
                         
-                        # DEBUG: Log higher highs found
-                        higher_count = len(higher_historical_highs) if not higher_historical_highs.empty else 0
-                        print(f"[DEBUG] {stock}: Found {higher_count} historical highs > {latest_high_of_day:.2f}")
-                        
                         if not higher_historical_highs.empty:
                             potential_tp_levels_from_history = sorted(list(set(higher_historical_highs.tolist())))
-                            
-                            # DEBUG: Log actual values
-                            print(f"[DEBUG] {stock}: Sorted unique higher highs: {[f'{h:.2f}' for h in potential_tp_levels_from_history]}")
-                        else:
-                            print(f"[DEBUG] {stock}: No higher historical highs found")
-                    else:
-                        print(f"[DEBUG] {stock}: No historical data before latest date")
-                else:
-                    print(f"[DEBUG] {stock}: Insufficient historical data for TP search")
-                
-                # debug_message = f"\n{stock} - Latest close: {latest_close:.2f} on {latest_date_str}\n"
-                # progress_callback(debug_message)
                 
                 broke_high = False
                 break_reasons = []
-                break_types_for_history = {} # Stores break_date and days_since for current run history
-                high_prices_for_stock_output = {} # Stores actual high prices for new breaks for output summary
+                break_types_for_history = {}
+                high_prices_for_stock_output = {}
 
                 stock_hist_today = current_date_history.get(stock, {})
 
@@ -258,8 +255,8 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
     except Exception as e:
         return stock, None, f"Error processing {stock}: {str(e)}"
 
-def detect_break_high_price(options, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback):
-    """Detect break high price based on selected options and update UI via callbacks. Uses threading for speed."""
+def detect_break_high_price(filters, output_list_for_plan, progress_callback, completion_callback, set_continue_button_state_callback):
+    """Detect break high price based on selected filters and update UI via callbacks."""
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -268,9 +265,12 @@ def detect_break_high_price(options, output_list_for_plan, progress_callback, co
     output_list_for_plan.clear()
     set_continue_button_state_callback(False)
     
-    if not any(options.values()):
-        progress_callback("Please select at least one period option.\n")
-        completion_callback([], "Please select at least one period option.\n", "")
+    break_high_options = filters.get('break_high', {})
+    technical_options = filters.get('technical', {})
+    
+    if not any(break_high_options.values()):
+        progress_callback("Please select at least one Break High Price filter.\n")
+        completion_callback([], "Please select at least one Break High Price filter.\n", "")
         return
     
     progress_callback("Starting detection (using threads)...\n")
@@ -279,103 +279,111 @@ def detect_break_high_price(options, output_list_for_plan, progress_callback, co
         progress_callback(message)
         completion_callback([], message, "Detection aborted.")
         return
-        
+    
     progress_callback(f"Total stocks to check: {len(stocks)}\n")
     
     detection_history = load_detection_history()
     current_date_str = datetime.now().strftime("%Y-%m-%d")
-    latest_date_for_run_dt = datetime.now().date() # For comparing days_since uniformly
+    latest_date_for_run_dt = datetime.now().date()
     
     if current_date_str not in detection_history:
         detection_history[current_date_str] = {}
-        
+    
     # Prune old history (more than 10 days)
-    # This should ideally be based on the actual dates, not just number of keys if keys aren't guaranteed daily
     sorted_history_dates = sorted(list(detection_history.keys()))
     if len(sorted_history_dates) > 10:
-        for old_date_key in sorted_history_dates[:-10]: # Keep the 10 most recent keys
+        for old_date_key in sorted_history_dates[:-10]:
             if old_date_key in detection_history:
                 del detection_history[old_date_key]
     
-    detected_stocks_for_processing = [] 
+    detected_stocks_for_processing = []
     processed_count = 0
     total_stocks = len(stocks)
 
-    # Using ThreadPoolExecutor for concurrent requests
-    # Max workers can be tuned. Too many might overwhelm the API or local resources.
-    # Let's start with a reasonable number, e.g., 5 or 10.
     MAX_WORKERS = 10 
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Map of future to stock symbol for tracking
         future_to_stock = {executor.submit(fetch_and_process_stock_data, 
-                                          stock, 
-                                          options, 
-                                          base_url, 
-                                          detection_history.get(current_date_str, {}), # Pass today's history for that stock
-                                          latest_date_for_run_dt):
-                           stock for stock in stocks}
-        
+                                           stock, 
+                                           break_high_options, 
+                                           base_url, 
+                                           detection_history.get(current_date_str, {}),
+                                           latest_date_for_run_dt):
+                            stock for stock in stocks}
+
         for future in concurrent.futures.as_completed(future_to_stock):
             stock_symbol = future_to_stock[future]
             try:
                 stock_symbol_result, result_data, error_message = future.result()
                 
                 processed_count += 1
-                progress_callback(f"({processed_count}/{total_stocks}) Processed {stock_symbol_result}. ") 
+                progress_callback(f"({processed_count}/{total_stocks}) Processed {stock_symbol_result}. ")
 
                 if error_message:
                     progress_callback(f"Skipped: {error_message}\n")
-                    # Even if skipped due to "No breaks", result_data might contain latest prices and potential_tp_levels
-                    # If we wanted to use that, we could, but for now, we only add to detected_stocks_for_processing if there was an actual break.
-                
-                # We now only proceed to add to detected_stocks_for_processing if there are actual break_reasons.
-                # The result_data from fetch_and_process_stock_data always has the full tuple structure.
+                    continue
+
                 if result_data:
                     break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, break_types_hist, potential_tp_levels = result_data
                     
-                    if break_reasons: # Only proceed if actual break reasons exist
-                        # Append tuple: (stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history)
+                    if break_reasons:
+                        # Apply technical filters if any are selected
+                        if any(technical_options.values()):
+                            try:
+                                response = requests.get(f"{base_url}/api/stocks/{stock_symbol_result}?start_date=2023-01-01")
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    if data and "historical_data" in data:
+                                        df = pd.DataFrame(data["historical_data"])
+                                        df["date"] = pd.to_datetime(df["date"])
+                                        df = df.sort_values("date")
+                                        
+                                        if not apply_technical_filters(df, technical_options):
+                                            progress_callback(f"Skipped {stock_symbol_result}: Did not meet technical criteria.\n")
+                                            continue
+                                        
+                                        # Add technical analysis summary to break reasons
+                                        tech_summary = get_technical_analysis_summary(df, technical_options)
+                                        break_reasons.append(f"Technical Analysis: {tech_summary}")
+                            except Exception as e:
+                                progress_callback(f"Error applying technical filters for {stock_symbol_result}: {str(e)}\n")
+                                continue
+
                         detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, potential_tp_levels))
                         progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
 
-                        # Update history for this stock for today (only if it was a break)
                         if stock_symbol_result not in detection_history[current_date_str]:
                             detection_history[current_date_str][stock_symbol_result] = {}
                         
-                        # Persist break types (dates, days_since) and associated high prices
                         for key, value in break_types_hist.items():
                              detection_history[current_date_str][stock_symbol_result][key] = value
                         if high_prices_output: 
-                            # Ensure high_prices key exists before trying to merge with it
                             if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
                                 detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
                             detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
                 
             except Exception as exc:
-                processed_count += 1 # Still count as processed for progress
+                processed_count += 1
                 progress_callback(f"({processed_count}/{total_stocks}) Error processing {stock_symbol}: {exc}\n")
-    
+
     save_detection_history(detection_history)
     output_list_for_plan.extend(detected_stocks_for_processing)
 
     summary_text_parts = []
     if detected_stocks_for_processing:
-        summary_text_parts.append("Detected stocks breaking high price:\n\n")
+        summary_text_parts.append("Detected stocks breaking high price and meeting technical criteria:\n\n")
         for stock_name, reasons, close, low_of_day, high_of_day, highs_info, pot_tps in detected_stocks_for_processing:
             summary_text_parts.append(f"{stock_name}: { ', '.join(reasons) } - Close: {close:.2f}, Low: {low_of_day:.2f}, High: {high_of_day:.2f}\n")
-            if highs_info: # This is period_high_prices_info (highs that were broken)
+            if highs_info:
                 summary_text_parts.append(f"    Broken Period Highs: { {k: f'{v:.2f}' for k, v in highs_info.items()} }\n")
             if pot_tps:
-                summary_text_parts.append(f"    Potential TPs from History (> {high_of_day:.2f}): { [f'{tp:.2f}' for tp in pot_tps[:3]] }\n") # Show first 3
-            summary_text_parts.append("\n") # Add a newline for better readability per stock
+                summary_text_parts.append(f"    Potential TPs from History (> {high_of_day:.2f}): { [f'{tp:.2f}' for tp in pot_tps[:3]] }\n")
+            summary_text_parts.append("\n")
     else:
-        summary_text_parts.append("No stocks breaking high price detected.\n")
+        summary_text_parts.append("No stocks meeting all selected criteria.\n")
     
-    final_status_message = f"\nDetection complete. Found {len(detected_stocks_for_processing)} stocks breaking high price.\n"
+    final_status_message = f"\nDetection complete. Found {len(detected_stocks_for_processing)} stocks meeting all criteria.\n"
     
     completion_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message)
 
     if detected_stocks_for_processing:
-        set_continue_button_state_callback(True)
-    # No explicit else to disable button, it's handled by the initial set_continue_button_state_callback(False)
-    # and only enabled if stocks are found. 
+        set_continue_button_state_callback(True) 

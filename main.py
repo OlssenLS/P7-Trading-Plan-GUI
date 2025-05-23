@@ -11,6 +11,7 @@ from tkinter import simpledialog # For asking risk percentage
 # Import from the new module
 from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
 from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder # Import new functions
+from filterManager import FilterManager
 
 # Get the script directory for file paths - This SCRIPT_DIR is for main.py specific paths if any.
 # The breakHighPriceDetection module manages its own SCRIPT_DIR for its file operations.
@@ -41,15 +42,6 @@ spinner.start()
 
 # Ensure data directory exists (using imported DATA_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
-
-# Create default stocks.txt if it doesn't exist (using imported STOCKS_FILE)
-if not os.path.exists(STOCKS_FILE):
-    default_stocks = [
-        "BBCA", "BBRI", "BMRI", "TLKM", "ASII", 
-        "UNVR", "INDF", "ICBP", "SMGR", "CPIN"
-    ]
-    with open(STOCKS_FILE, "w") as f:
-        f.write("\n".join(default_stocks))
 
 # Main Treeview for displaying saved plans
 main_plan_display_treeview = None # Will be assigned in show_main_page
@@ -301,32 +293,19 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ori
 
 def open_generator_window():
     """Open a new window for the generator"""
-    generator_window = ttk.Toplevel(title="Break High Price Detector")
-    generator_window.geometry("600x500")
+    generator_window = ttk.Toplevel(title="Stock Screener")
+    generator_window.geometry("600x600")
     
-    # Create a frame for the options
-    options_frame = ttk.Frame(generator_window)
-    options_frame.pack(fill=X, padx=20, pady=20)
+    # Create a frame for all filters
+    filters_frame = ttk.Frame(generator_window)
+    filters_frame.pack(fill=X, padx=20, pady=20)
     
-    # Options
-    ttk.Label(options_frame, text="Select Break High Period Options:", font=("Helvetica", 12)).pack(anchor=W)
-    
-    options = {
-        "5_days": ttk.BooleanVar(),
-        "1_month": ttk.BooleanVar(),
-        "2_months": ttk.BooleanVar(),
-        "3_months": ttk.BooleanVar()
-    }
-    
-    # Checkboxes
-    ttk.Checkbutton(options_frame, text="5 Days High Price", variable=options["5_days"]).pack(anchor=W, pady=5)
-    ttk.Checkbutton(options_frame, text="1 Month High Price", variable=options["1_month"]).pack(anchor=W, pady=5)
-    ttk.Checkbutton(options_frame, text="2 Months High Price", variable=options["2_months"]).pack(anchor=W, pady=5)
-    ttk.Checkbutton(options_frame, text="3 Months High Price", variable=options["3_months"]).pack(anchor=W, pady=5)
+    # Initialize the filter manager
+    filter_manager = FilterManager(filters_frame)
     
     # Button frame
-    button_frame = ttk.Frame(options_frame)
-    button_frame.pack(fill=X, pady=10)
+    button_frame = ttk.Frame(generator_window)
+    button_frame.pack(fill=X, padx=20, pady=(0, 10))
     
     # Results frame
     results_frame = ttk.Frame(generator_window)
@@ -347,19 +326,18 @@ def open_generator_window():
     # Continue button (initially disabled)
     continue_button = ttk.Button(
         button_frame,
-        text="Continue to Plan Setup", # Renamed for clarity
+        text="Continue to Plan Setup",
         bootstyle="info",
-        state=DISABLED, # Start disabled
+        state=DISABLED,
         command=lambda: open_trading_plan_window(generator_window, shared_detected_stocks_list)
     )
     
     # Callback implementations for detect_break_high_price
     def progress_callback_impl(message):
-        if result_text.winfo_exists(): # Check if widget still exists
+        if result_text.winfo_exists():
             root.after(0, lambda: (
                 result_text.insert(END, message), 
-                result_text.see(END) 
-                # result_text.update() # update() can be slow, see(END) is often enough
+                result_text.see(END)
             ))
 
     def completion_callback_impl(detected_stocks_summary_data, summary_text, final_status):
@@ -375,27 +353,26 @@ def open_generator_window():
         if continue_button.winfo_exists():
             root.after(0, lambda: continue_button.config(state=NORMAL if enable else DISABLED))
 
-
     # Run button
     run_button = ttk.Button(
         button_frame, 
         text="Run Detection", 
         bootstyle="success",
         command=lambda: threading.Thread(
-            target=detect_break_high_price, # Use imported function
+            target=detect_break_high_price,
             args=(
-                {k: v.get() for k, v in options.items()},
-                shared_detected_stocks_list, # Pass the list to be populated
-                progress_callback_impl,      # Pass the callback
-                completion_callback_impl,    # Pass the callback
-                set_continue_button_state_impl # Pass the callback
+                filter_manager.get_selected_filters(),
+                shared_detected_stocks_list,
+                progress_callback_impl,
+                completion_callback_impl,
+                set_continue_button_state_impl
             ),
             daemon=True
         ).start()
     )
     run_button.pack(side=LEFT, padx=5)
     
-    continue_button.pack(side=LEFT, padx=5) # Placed after Screener button
+    continue_button.pack(side=LEFT, padx=5)
 
 def show_main_page():
     global main_plan_display_treeview # Declare global to assign
