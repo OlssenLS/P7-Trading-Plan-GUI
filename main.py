@@ -16,6 +16,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplfinance as mpf
 from PIL import Image, ImageTk # For displaying chart in Tkinter
+import numpy as np # Added import
+from scipy.signal import find_peaks # Will be replaced by trendln
+import trendln # Added import for trendln
+from trendln import METHOD_NUMDIFF, METHOD_NSQUREDLOGN # Added import for trendln methods
 
 # Import from the new module
 from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
@@ -344,6 +348,112 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
                                    'axes.edgecolor':'gray', 'axes.titlecolor':'lightgray', 
                                    'ytick.color':'lightgray', 'axes.facecolor':'k'})
 
+        # --- Trend Line Calculation using trendln ---
+        alines_data = []
+        line_colors = []
+
+        # Initialize variables to ensure they are defined even if trendln call fails
+        minima_idx, min_avg_line, min_trend_lines, min_windows_discard = [], None, [], None
+        maxima_idx, max_avg_line, max_trend_lines, max_windows_discard = [], None, [], None
+
+        # Ensure the DataFrame index is suitable for trendln if it expects simple integer indices for calculation
+        # mplfinance handles datetime indices for plotting, but trendln might need integer indices.
+        # For simplicity, we'll pass the price data as numpy arrays, which trendln handles.
+        # trendln typically returns indices relative to the input array.
+        
+        # Use 'Low' for support and 'High' for resistance
+        # df.reset_index(drop=True) might be needed if trendln has issues with DatetimeIndex directly
+        # For now, assume passing Series.values (numpy array) is fine.
+        low_prices = df['Low'].values
+        high_prices = df['High'].values
+
+        try:
+            # Calculate support and resistance lines using trendln
+            # Using tuple (low_prices, high_prices) to get both support and resistance
+            # We can specify extmethod and method if defaults are not desired.
+            # Defaults: extmethod=METHOD_NUMDIFF, method=METHOD_NSQUREDLOGN
+            
+            trendln_result = trendln.calc_support_resistance(
+                (low_prices, high_prices),
+                extmethod=METHOD_NUMDIFF,
+                method=METHOD_NSQUREDLOGN,
+                window=max(20, int(len(df) * 0.7)), # Adjusted window size
+                errpct=0.01, # Allow a bit more error margin
+                accuracy=20
+            )
+
+            # Check the structure of trendln_result before unpacking
+            if isinstance(trendln_result, tuple) and len(trendln_result) == 2:
+                support_results, resistance_results = trendln_result
+                if isinstance(support_results, tuple) and len(support_results) == 4:
+                    minima_idx, min_avg_line, min_trend_lines, min_windows_discard = support_results
+                if isinstance(resistance_results, tuple) and len(resistance_results) == 4:
+                    maxima_idx, max_avg_line, max_trend_lines, max_windows_discard = resistance_results
+            else:
+                # Handle cases where trendln doesn't return the expected structure
+                # Variables will retain their initialized default values (e.g., empty lists for trend_lines)
+                print(f"Trendln did not return the expected 2-tuple of 4-element tuples for {stock_symbol}. Result: {trendln_result}")
+
+            # Add the best support line if available
+            if min_trend_lines:
+                best_support_line_points_indices = min_trend_lines[0][0]
+                if len(best_support_line_points_indices) >= 2:
+                    idx1_supp = best_support_line_points_indices[0]
+                    idx2_supp = best_support_line_points_indices[-1]
+
+                    if idx1_supp != idx2_supp: # Avoid division by zero for slope calculation
+                        price1_supp = low_prices[idx1_supp]
+                        price2_supp = low_prices[idx2_supp]
+
+                        # Calculate slope and intercept using array indices for x-values
+                        slope_supp = (price2_supp - price1_supp) / (idx2_supp - idx1_supp)
+                        intercept_supp = price1_supp - slope_supp * idx1_supp
+
+                        # Extrapolate to chart boundaries
+                        chart_start_idx = 0
+                        chart_end_idx = len(df) - 1
+
+                        ext_price_start_supp = slope_supp * chart_start_idx + intercept_supp
+                        ext_price_end_supp = slope_supp * chart_end_idx + intercept_supp
+
+                        ext_date_start_supp = df.index[chart_start_idx]
+                        ext_date_end_supp = df.index[chart_end_idx]
+                        
+                        alines_data.append([(ext_date_start_supp, ext_price_start_supp), (ext_date_end_supp, ext_price_end_supp)])
+                        line_colors.append('g')  # Green for support
+
+            # Add the best resistance line if available
+            if max_trend_lines:
+                best_resistance_line_points_indices = max_trend_lines[0][0]
+                if len(best_resistance_line_points_indices) >= 2:
+                    idx1_res = best_resistance_line_points_indices[0]
+                    idx2_res = best_resistance_line_points_indices[-1]
+
+                    if idx1_res != idx2_res: # Avoid division by zero
+                        price1_res = high_prices[idx1_res]
+                        price2_res = high_prices[idx2_res]
+
+                        slope_res = (price2_res - price1_res) / (idx2_res - idx1_res)
+                        intercept_res = price1_res - slope_res * idx1_res
+
+                        chart_start_idx = 0
+                        chart_end_idx = len(df) - 1
+
+                        ext_price_start_res = slope_res * chart_start_idx + intercept_res
+                        ext_price_end_res = slope_res * chart_end_idx + intercept_res
+
+                        ext_date_start_res = df.index[chart_start_idx]
+                        ext_date_end_res = df.index[chart_end_idx]
+
+                        alines_data.append([(ext_date_start_res, ext_price_start_res), (ext_date_end_res, ext_price_end_res)])
+                        line_colors.append('r')  # Red for resistance
+        
+        except Exception as e:
+            print(f"Error calculating trend lines with trendln for {stock_symbol}: {e}")
+            # Fallback or do nothing if trendln fails
+
+        # --- End Trend Line Calculation using trendln ---
+
         # Create a Matplotlib figure and add an Axes to it
         # The figure size will be controlled by the Tkinter layout (pack with expand=True, fill=BOTH)
         fig = plt.Figure(facecolor='k') # Ensure figure background is black
@@ -359,6 +469,7 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
                  ax=ax_price,         # Main price chart on ax_price
                  volume=ax_volume,    # Volume chart on ax_volume
                  show_nontrading=False,
+                 alines=dict(alines=alines_data, colors=line_colors) # Always pass a dict for alines
                 )
         
         # Explicitly remove x-axis labels and ticks from the price axes

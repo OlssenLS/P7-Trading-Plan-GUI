@@ -5,3 +5,6 @@ requests
 matplotlib
 mplfinance
 Pillow
+scipy
+trendln
+findiff
