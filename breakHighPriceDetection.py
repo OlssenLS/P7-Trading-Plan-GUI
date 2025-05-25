@@ -33,9 +33,6 @@ def get_persistent_data_path(relative_path):
     base_path = get_application_path()
     return os.path.join(base_path, relative_path)
 
-# Get the script directory for file paths - Original, keep for reference or other uses if needed.
-# SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # Constants for data paths and break tracking using resource_path
 STOCKS_FILE = resource_path("stocks.txt")
 DATA_DIR = get_persistent_data_path("data") # Ensures data directory is found/created next to exe/script
@@ -147,6 +144,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                     yesterday_high = df.iloc[-2]["high"]
                     if latest_high_of_day > yesterday_high:
                         is_new_break_1d = True
+                        broke_high = True
                         break_types_for_history["1d_break_date"] = latest_date_str
                         high_prices_for_stock_output["1d"] = yesterday_high
                         break_reasons.append("1 Day High (New Break)")

@@ -1,18 +1,5 @@
 import requests
 import pandas as pd
-import numpy as np
-
-def fetch_all_stocks_data():
-    """Fetch latest data with indicators for all stocks"""
-    url = "https://yfinance-web-indonesia-data.vercel.app/api/stocks?start_date=2023-01-01"
-    try:
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.json().get('stocks', [])
-        return []
-    except Exception as e:
-        print(f"Error fetching stocks data: {e}")
-        return []
 
 def calculate_ema(data, period):
     """Calculate Exponential Moving Average"""
