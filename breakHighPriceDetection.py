@@ -394,8 +394,6 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
             summary_text_parts.append(f"{stock_name}: { ', '.join(reasons) } - Close: {close:.2f}, Low: {low_of_day:.2f}, High: {high_of_day:.2f}\n")
             if highs_info:
                 summary_text_parts.append(f"    Broken Period Highs: { {k: f'{v:.2f}' for k, v in highs_info.items()} }\n")
-            if pot_tps:
-                summary_text_parts.append(f"    Potential TPs from History (> {high_of_day:.2f}): { [f'{tp:.2f}' for tp in pot_tps[:3]] }\n")
             summary_text_parts.append("\n")
     else:
         summary_text_parts.append("No stocks meeting all selected criteria.\n")

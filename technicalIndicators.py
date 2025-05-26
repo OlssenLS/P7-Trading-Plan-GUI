@@ -23,10 +23,32 @@ def calculate_stochastic(data, k_period=14, d_period=3):
     d = k.rolling(window=d_period).mean()
     return k, d
 
+def calculate_stochastic_golden_cross(data, k_period=14, d_period=3):
+    """Calculate Stochastic Oscillator and detect a golden cross."""
+    low_min = data['low'].rolling(window=k_period).min()
+    high_max = data['high'].rolling(window=k_period).max()
+    
+    k = 100 * ((data['close'] - low_min) / (high_max - low_min))
+    d = k.rolling(window=d_period).mean()
+
+    if len(k) < 2 or len(d) < 2:
+        return False # Not enough data for a cross
+
+    # Golden cross: K crosses above D
+    # K was below D in the previous period, and K is above D in the current period
+    golden_cross = (k.iloc[-2] < d.iloc[-2]) & (k.iloc[-1] > d.iloc[-1])
+    return golden_cross
+
 def check_volume_criteria(data):
-    """Check if volume is above average"""
-    avg_volume = data['volume'].rolling(window=20).mean()
-    return data['volume'] > avg_volume
+    """Check if volume is above 5-day high or 20-day high"""
+    if len(data['volume']) < 20: # Ensure enough data for 20-day high
+        return False 
+    
+    current_volume = data['volume'].iloc[-1]
+    high_5_day = data['volume'].rolling(window=5).max().iloc[-2] # Use -2 to exclude current day's volume if it's part of the series being formed
+    high_20_day = data['volume'].rolling(window=20).max().iloc[-2]
+    
+    return current_volume > high_5_day or current_volume > high_20_day
 
 # --- Apply Technical Filters ---
 def apply_technical_filters(df, filters):
@@ -50,11 +72,11 @@ def apply_technical_filters(df, filters):
         meets_criteria &= macd.iloc[-1] > signal.iloc[-1]
 
     if filters.get('stochastic'):
-        k, d = calculate_stochastic(df)
-        meets_criteria &= 20 <= k.iloc[-1] <= 80 and 20 <= d.iloc[-1] <= 80
+        golden_cross = calculate_stochastic_golden_cross(df)
+        meets_criteria &= golden_cross
 
     if filters.get('volume'):
-        meets_criteria &= check_volume_criteria(df).iloc[-1]
+        meets_criteria &= check_volume_criteria(df)
 
     return meets_criteria
 
@@ -80,15 +102,24 @@ def get_technical_analysis_summary(df, filters):
             summary.append("MACD above Signal")
     
     if filters.get('stochastic'):
-        k, d = calculate_stochastic(df)
-        stoch_k = k.iloc[-1]
-        stoch_d = d.iloc[-1]
-        if 20 <= stoch_k <= 80 and 20 <= stoch_d <= 80:
-            summary.append("Stochastic in neutral zone")
+        if calculate_stochastic_golden_cross(df):
+            summary.append("Stochastic Golden Cross")
     
     if filters.get('volume'):
-        volume_above_avg = check_volume_criteria(df)
-        if volume_above_avg.iloc[-1]:
-            summary.append("Volume above 20-day average")
+        current_volume = df['volume'].iloc[-1]
+        if len(df['volume']) >= 5: # Check for 5-day high only if enough data
+            high_5_day = df['volume'].rolling(window=5).max().shift(1).iloc[-1] # shift(1) to get previous high
+            if current_volume > high_5_day:
+                summary.append("Volume above 5-day high")
+        
+        if len(df['volume']) >= 20: # Check for 20-day high only if enough data
+             high_20_day = df['volume'].rolling(window=20).max().shift(1).iloc[-1] # shift(1) to get previous high
+             if current_volume > high_20_day and "Volume above 5-day high" not in summary: # Avoid duplicate message if also above 5-day
+                summary.append("Volume above 20-day high")
+        elif "Volume above 5-day high" not in summary and not (len(df['volume']) >= 5 and current_volume > df['volume'].rolling(window=5).max().shift(1).iloc[-1]): # If not already added and not enough data for 20 day
+             # Check if any volume criteria could be met at all based on data length
+            if not (len(df['volume']) >= 5 and current_volume > df['volume'].rolling(window=5).max().shift(1).iloc[-1]) and \
+               not (len(df['volume']) >= 20 and current_volume > df['volume'].rolling(window=20).max().shift(1).iloc[-1]):
+                 pass # No message if no criteria can be met or already added.
     
     return ", ".join(summary) if summary else "No significant technical signals" 

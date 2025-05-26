@@ -129,7 +129,6 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
 
     gen_plans_window = ttk.Toplevel(parent_window)
     gen_plans_window.title("Generated Trading Plans")
-    gen_plans_window.geometry("700x500")
     gen_plans_window.transient(parent_window)
     gen_plans_window.grab_set()
     center_toplevel_window(gen_plans_window)
@@ -203,7 +202,6 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
 
     plan_window = ttk.Toplevel(parent_window)
     plan_window.title("Generate Trading Plan")
-    plan_window.geometry("400x500")
     plan_window.transient(parent_window)
     plan_window.grab_set()
     center_toplevel_window(plan_window)
@@ -279,8 +277,6 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
 def open_generator_window():
     """Open a new window for the generator"""
     generator_window = ttk.Toplevel(title="Stocks Filter System")
-    generator_window.geometry("700x650")
-    center_toplevel_window(generator_window)
 
     main_gen_frame = ttk.Frame(generator_window, padding=10)
     main_gen_frame.pack(fill=BOTH, expand=True)
@@ -394,6 +390,8 @@ def open_generator_window():
     run_button.pack(side=LEFT, padx=5)
     continue_button.pack(side=LEFT, padx=5)
 
+    center_toplevel_window(generator_window) # Call after all widgets are packed
+
 # --- Main Application Page ---
 def show_main_page():
     global main_plan_display_treeview
@@ -462,7 +460,6 @@ def show_main_page():
 def open_manage_plans_window(parent_window):
     manage_window = ttk.Toplevel(parent_window)
     manage_window.title("Manage Saved Trading Plans")
-    manage_window.geometry("800x500")
     manage_window.transient(parent_window)
     manage_window.grab_set()
     center_toplevel_window(manage_window)

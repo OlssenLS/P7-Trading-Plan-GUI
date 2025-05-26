@@ -36,11 +36,11 @@ class FilterManager:
 
         # Technical indicator options
         tech_options = {
-            "ema_20": "EMA 20",
-            "ema_60": "EMA 60",
-            "macd": "MACD",
-            "stochastic": "Stochastic",
-            "volume": "Volume"
+            "ema_20": "Price Above EMA 20",
+            "ema_60": "Price Above EMA 60",
+            "macd": "MACD Bullish (GC)",
+            "stochastic": "Stochastic Bullish (GC)",
+            "volume": "Volume Above 5 and/or 20 Days High"
         }
 
         for key, text in tech_options.items():
