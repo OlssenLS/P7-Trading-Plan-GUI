@@ -6,7 +6,7 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import json
-from tkinter import simpledialog
+from tkinter import simpledialog, filedialog
 import io
 
 # Charting imports
@@ -169,6 +169,8 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     def discard_action():
         gen_plans_window.destroy()
 
+    discard_button = ttk.Button(button_gen_frame, text="Discard Plans", command=discard_action, bootstyle="danger")
+
     def save_action():
         global main_plan_display_treeview
         print("Saving generated plans...")
@@ -183,7 +185,32 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
             
         gen_plans_window.destroy()
 
-    discard_button = ttk.Button(button_gen_frame, text="Discard Plans", command=discard_action, bootstyle="danger")
+    def convert_to_spreadsheet_action():
+        if not generated_plans:
+            simpledialog.messagebox.showinfo("No Data", "No plans to convert.", parent=gen_plans_window)
+            return
+
+        try:
+            df = pd.DataFrame(generated_plans)
+            columns_to_drop = ['latest_close', 'latest_high_of_day', 'latest_low_of_day', 'notes', 'rr_tp1']
+            df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+            
+            default_filename = f"trading_plans_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Save Trading Plans as Excel",
+                parent=gen_plans_window
+            )
+            if filepath:
+                df.to_excel(filepath, index=False)
+                simpledialog.messagebox.showinfo("Success", f"Plans successfully saved to {filepath}", parent=gen_plans_window)
+        except Exception as e:
+            simpledialog.messagebox.showerror("Error", f"Could not save to Excel: {e}", parent=gen_plans_window)
+
+    convert_button = ttk.Button(button_gen_frame, text="Convert to Spreadsheet", command=convert_to_spreadsheet_action, bootstyle="info")
+    convert_button.pack(side=LEFT, padx=5)
     discard_button.pack(side=LEFT, padx=5)
 
     save_button = ttk.Button(button_gen_frame, text="Save & Display Plans", command=save_action, bootstyle="success")

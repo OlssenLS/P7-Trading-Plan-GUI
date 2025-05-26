@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import concurrent.futures
 import sys
 from technicalIndicators import apply_technical_filters, get_technical_analysis_summary
+import asyncio
 
 # --- Path Helpers (Resource and Persistent Data) ---
 def resource_path(relative_path):
@@ -357,11 +358,13 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
                                         df["date"] = pd.to_datetime(df["date"])
                                         df = df.sort_values("date")
                                         
-                                        if not apply_technical_filters(df, technical_options):
+                                        # Run async functions using asyncio.run() in the thread
+                                        meets_technical_criteria = asyncio.run(apply_technical_filters(df, technical_options))
+                                        if not meets_technical_criteria:
                                             progress_callback(f"Skipped {stock_symbol_result}: Did not meet technical criteria.\n")
                                             continue
                                         
-                                        tech_summary = get_technical_analysis_summary(df, technical_options)
+                                        tech_summary = asyncio.run(get_technical_analysis_summary(df, technical_options))
                                         break_reasons.append(f"Technical Analysis: {tech_summary}")
                             except Exception as e:
                                 progress_callback(f"Error applying technical filters for {stock_symbol_result}: {str(e)}\n")
