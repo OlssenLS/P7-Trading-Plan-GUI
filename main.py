@@ -138,7 +138,7 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
 
     ttk.Label(main_gen_frame, text="Generated Trading Plans:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
 
-    columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "rr_tp1")
+    columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3")
     tree = ttk.Treeview(main_gen_frame, columns=columns, show="headings", height=10)
     
     tree.heading("stock", text="Stock")
@@ -147,7 +147,6 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     tree.heading("tp1", text="TP1")
     tree.heading("tp2", text="TP2")
     tree.heading("tp3", text="TP3")
-    tree.heading("rr_tp1", text="RR (TP1)")
 
     tree.column("stock", width=80, anchor=CENTER)
     tree.column("entry_price", width=100, anchor=CENTER)
@@ -155,7 +154,6 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     tree.column("tp1", width=100, anchor=CENTER)
     tree.column("tp2", width=100, anchor=CENTER)
     tree.column("tp3", width=100, anchor=CENTER)
-    tree.column("rr_tp1", width=80, anchor=CENTER)
 
     for plan in generated_plans:
         tree.insert("", END, values=([plan.get(col, "N/A") for col in columns]))
@@ -216,16 +214,22 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
 
     ttk.Label(main_frame, text="Select stocks to generate trading plan for:", font=("Helvetica", 10, "bold")).pack(anchor=W, pady=(0, 10))
 
-    stocks_frame = ttk.Frame(main_frame)
-    stocks_frame.pack(fill=BOTH, expand=True, pady=5)
+    stocks_outer_frame = ttk.Frame(main_frame)
+    stocks_outer_frame.pack(fill=BOTH, expand=True, pady=5)
     
     selected_stocks_vars = {}
+    stocks_per_row = 4
+    current_row_frame = None
 
-    for stock_info in stocks_for_plan_generation_data:
+    for i, stock_info in enumerate(stocks_for_plan_generation_data):
+        if i % stocks_per_row == 0:
+            current_row_frame = ttk.Frame(stocks_outer_frame)
+            current_row_frame.pack(fill=X, anchor=W)
+
         stock_name = stock_info[0]
         var = ttk.BooleanVar(value=False)
-        chk = ttk.Checkbutton(stocks_frame, text=stock_name, variable=var)
-        chk.pack(anchor=W, pady=2)
+        chk = ttk.Checkbutton(current_row_frame, text=stock_name, variable=var)
+        chk.pack(side=LEFT, anchor=W, pady=2, padx=5)
         selected_stocks_vars[stock_name] = var
 
     plan_type_frame = ttk.Frame(main_frame)
