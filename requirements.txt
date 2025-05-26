@@ -5,5 +5,3 @@ requests
 matplotlib
 mplfinance
 Pillow
-trendln
-findiff

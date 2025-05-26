@@ -1,6 +1,7 @@
 import requests
 import pandas as pd
 
+# --- Technical Indicator Calculation Functions ---
 def calculate_ema(data, period):
     """Calculate Exponential Moving Average"""
     return data.ewm(span=period, adjust=False).mean()
@@ -27,6 +28,7 @@ def check_volume_criteria(data):
     avg_volume = data['volume'].rolling(window=20).mean()
     return data['volume'] > avg_volume
 
+# --- Apply Technical Filters ---
 def apply_technical_filters(df, filters):
     """Apply selected technical filters to the data"""
     if df.empty:
@@ -45,11 +47,10 @@ def apply_technical_filters(df, filters):
 
     if filters.get('macd'):
         macd, signal = calculate_macd(df['close'])
-        meets_criteria &= macd.iloc[-1] > signal.iloc[-1]  # MACD above signal line
+        meets_criteria &= macd.iloc[-1] > signal.iloc[-1]
 
     if filters.get('stochastic'):
         k, d = calculate_stochastic(df)
-        # Check if Stochastic is between 20 and 80 (not overbought/oversold)
         meets_criteria &= 20 <= k.iloc[-1] <= 80 and 20 <= d.iloc[-1] <= 80
 
     if filters.get('volume'):
@@ -57,12 +58,12 @@ def apply_technical_filters(df, filters):
 
     return meets_criteria
 
+# --- Generate Technical Analysis Summary ---
 def get_technical_analysis_summary(df, filters):
     """Generate a summary of technical analysis based on selected filters only"""
     summary = []
     latest = df.iloc[-1]
     
-    # Only calculate and show indicators that were selected
     if filters.get('ema_20'):
         ema20 = calculate_ema(df['close'], 20)
         if latest['close'] > ema20.iloc[-1]:

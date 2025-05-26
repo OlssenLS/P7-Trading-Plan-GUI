@@ -6,28 +6,22 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import json
-from tkinter import simpledialog # For asking risk percentage
-import io # For handling image data in memory
+from tkinter import simpledialog
+import io
 
 # Charting imports
 import matplotlib
-matplotlib.use("TkAgg") # Advised for Tkinter compatibility
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplfinance as mpf
-from scipy.signal import find_peaks # Will be replaced by trendln
 
-# Import from the new module
+# Module Imports
 from breakHighPriceDetection import detect_break_high_price, DATA_DIR, STOCKS_FILE, get_stock_list
-from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder # Import new functions
-from filterManager import FilterManager # Added import
-from trendLineManualConfirm import open_trend_line_confirmation_window # Added import
+from autoGenerateTradingPlan import generate_plans_for_stocks, display_plans_in_main_area_placeholder
+from filterManager import FilterManager
+from trendLineManualConfirm import open_trend_line_confirmation_window
 
-# Get the script directory for file paths - This SCRIPT_DIR is for main.py specific paths if any.
-# The breakHighPriceDetection module manages its own SCRIPT_DIR for its file operations.
-# SCRIPT_DIR_MAIN = os.path.dirname(os.path.abspath(__file__)) # Keep if main.py has other file needs
-
-# Define the path for saved trading plans
 SAVED_PLANS_FILE = os.path.join(DATA_DIR, "saved_trading_plans.json")
 
 root = ttk.Window(themename="cyborg")
@@ -46,17 +40,11 @@ spinner = ttk.Progressbar(center_frame, orient=HORIZONTAL, length=300, mode="ind
 spinner.grid(column=0, row=0, padx=10, pady=10)
 spinner.start()
 
-# Constants for break tracking are now in breakHighPriceDetection.py
-# DATA_DIR, STOCKS_FILE are imported. DETECTION_HISTORY_FILE is managed by the module.
-# KEEP_..._DAYS constants are managed by the module.
-
-# Ensure data directory exists (using imported DATA_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Main Treeview for displaying saved plans
-main_plan_display_treeview = None # Will be assigned in show_main_page
+main_plan_display_treeview = None
 
-# --- Functions for loading and saving plans ---
+# --- Plan File Operations (Load/Save/Delete All) ---
 def load_plans_from_file():
     """Loads trading plans from the JSON file."""
     if not os.path.exists(SAVED_PLANS_FILE):
@@ -64,34 +52,25 @@ def load_plans_from_file():
     try:
         with open(SAVED_PLANS_FILE, "r") as f:
             plans = json.load(f)
-            # Ensure it's a list and handle empty file case gracefully
             return plans if isinstance(plans, list) else []
     except (IOError, json.JSONDecodeError) as e:
         print(f"Error loading plans from {SAVED_PLANS_FILE}: {e}")
-        # Optionally inform user, but for now, just return empty list
-        # simpledialog.messagebox.showwarning("Load Error", f"Could not load plans: {e}\nStarting with no saved plans.", parent=root)
-        # To prevent data loss on next save if file was corrupt, could rename/backup here
         return []
 
 def save_plans_to_file(new_plans_to_add):
     """Saves a list of new plans to the JSON file, updating existing or appending new."""
     existing_plans_list = load_plans_from_file()
-    
-    # For easier update, convert list of plans to a dict keyed by stock
     updated_plans_dict = {plan['stock']: plan for plan in existing_plans_list if 'stock' in plan}
-    
     current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     for new_plan in new_plans_to_add:
         if 'stock' in new_plan:
             stock_key = new_plan['stock']
             if stock_key in updated_plans_dict:
-                # If plan exists, update it but preserve original creation_date if it exists
                 existing_plan = updated_plans_dict[stock_key]
                 new_plan['creation_date'] = existing_plan.get('creation_date', current_time_str)
-                updated_plans_dict[stock_key] = new_plan 
+                updated_plans_dict[stock_key] = new_plan
             else:
-                # New plan, add creation_date
                 new_plan['creation_date'] = current_time_str
                 updated_plans_dict[stock_key] = new_plan
         
@@ -123,7 +102,6 @@ def delete_all_saved_plans():
         try:
             os.remove(SAVED_PLANS_FILE)
             simpledialog.messagebox.showinfo("Success", "All saved trading plans have been deleted.", parent=root)
-            # Refresh the display by showing an empty list
             if main_plan_display_treeview:
                 display_plans_in_main_area_placeholder([], main_plan_display_treeview)
         except OSError as e:
@@ -131,6 +109,7 @@ def delete_all_saved_plans():
     else:
         simpledialog.messagebox.showinfo("Cancelled", "Delete operation cancelled.", parent=root)
 
+# --- Generated Trading Plans Display Window ---
 def show_generated_plans_window(parent_window, generated_plans, original_plan_window):
     """Open a new window to display generated trading plans and offer save/discard options."""
     if not generated_plans:
@@ -139,21 +118,18 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
 
     gen_plans_window = ttk.Toplevel(parent_window)
     gen_plans_window.title("Generated Trading Plans")
-    gen_plans_window.geometry("700x500") # Adjusted size for better table display
+    gen_plans_window.geometry("700x500")
     gen_plans_window.transient(parent_window)
-    gen_plans_window.grab_set() # Make it modal
+    gen_plans_window.grab_set()
 
-    # Main frame for the generated plans window
     main_gen_frame = ttk.Frame(gen_plans_window, padding=10)
     main_gen_frame.pack(fill=BOTH, expand=True)
 
     ttk.Label(main_gen_frame, text="Generated Trading Plans:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
 
-    # Use a Treeview for a tabular display
     columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "rr_tp1")
     tree = ttk.Treeview(main_gen_frame, columns=columns, show="headings", height=10)
     
-    # Define headings
     tree.heading("stock", text="Stock")
     tree.heading("entry_price", text="Entry Price")
     tree.heading("stop_loss", text="Stop Loss")
@@ -162,7 +138,6 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     tree.heading("tp3", text="TP3")
     tree.heading("rr_tp1", text="RR (TP1)")
 
-    # Adjust column widths
     tree.column("stock", width=80, anchor=CENTER)
     tree.column("entry_price", width=100, anchor=CENTER)
     tree.column("stop_loss", width=100, anchor=CENTER)
@@ -171,19 +146,14 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     tree.column("tp3", width=100, anchor=CENTER)
     tree.column("rr_tp1", width=80, anchor=CENTER)
 
-    # Insert data
     for plan in generated_plans:
         tree.insert("", END, values=([plan.get(col, "N/A") for col in columns]))
 
     tree.pack(fill=BOTH, expand=True, pady=5)
 
-    # Add a scrollbar for the treeview
     scrollbar_tree = ttk.Scrollbar(main_gen_frame, orient=VERTICAL, command=tree.yview)
     tree.configure(yscrollcommand=scrollbar_tree.set)
-    # tree.pack(side=LEFT, fill=BOTH, expand=True) # Already packed above
-    # scrollbar_tree.pack(side=RIGHT, fill=Y) # Pack it next to the tree if needed, but tree.pack with expand usually handles this
 
-    # Button frame
     button_gen_frame = ttk.Frame(main_gen_frame)
     button_gen_frame.pack(fill=X, pady=(10, 0))
 
@@ -191,22 +161,18 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
         gen_plans_window.destroy()
 
     def save_action():
-        global main_plan_display_treeview # Use the new global variable name
-        print("Saving generated plans...") 
+        global main_plan_display_treeview
+        print("Saving generated plans...")
         
-        if save_plans_to_file(generated_plans): # Call the new save function
+        if save_plans_to_file(generated_plans):
             simpledialog.messagebox.showinfo("Plans Saved", "Trading plans have been successfully saved.", parent=gen_plans_window)
-            # Refresh the main page display by loading all plans (including newly saved)
             if main_plan_display_treeview:
-                all_saved_plans = load_plans_from_file() 
+                all_saved_plans = load_plans_from_file()
                 display_plans_in_main_area_placeholder(all_saved_plans, main_plan_display_treeview)
             else:
                 print("main_plan_display_treeview not initialized. Cannot refresh display.")
-        # else: # Error message is now shown by save_plans_to_file
-            # simpledialog.messagebox.showwarning("Save Error", "Could not save plans to file.", parent=gen_plans_window)
             
         gen_plans_window.destroy()
-        # Close the original plan_window as well (already handled below)
 
     discard_button = ttk.Button(button_gen_frame, text="Discard Plans", command=discard_action, bootstyle="danger")
     discard_button.pack(side=LEFT, padx=5)
@@ -214,25 +180,23 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     save_button = ttk.Button(button_gen_frame, text="Save & Display Plans", command=save_action, bootstyle="success")
     save_button.pack(side=RIGHT, padx=5)
 
-    # Close the original plan_window after this new window is set up
     if original_plan_window and original_plan_window.winfo_exists():
         original_plan_window.destroy()
 
+# --- Trading Plan Setup Window (Stock Selection & Plan Type) ---
 def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, initial_plan_type="Swing Trader", plan_type_disabled=False, original_screener_window=None):
     """Open a new window to select stocks for trading plan generation."""
-    # Close the screener window if it exists and is passed
     if original_screener_window and original_screener_window.winfo_exists():
         original_screener_window.destroy()
 
     plan_window = ttk.Toplevel(parent_window)
     plan_window.title("Generate Trading Plan")
     plan_window.geometry("400x500")
-    plan_window.transient(parent_window) # Make it appear on top of its parent
-    plan_window.grab_set() # Make it modal
+    plan_window.transient(parent_window)
+    plan_window.grab_set()
 
     if not stocks_for_plan_generation_data:
         ttk.Label(plan_window, text="No stocks available or selected from screener for plan generation.", padding=20).pack()
-        # Add a button to close this window if no stocks
         ttk.Button(plan_window, text="Close", command=plan_window.destroy).pack(pady=10)
         return
 
@@ -244,21 +208,19 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     stocks_frame = ttk.Frame(main_frame)
     stocks_frame.pack(fill=BOTH, expand=True, pady=5)
     
-    selected_stocks_vars = {} # Store {stock_name: BooleanVar}
+    selected_stocks_vars = {}
 
     for stock_info in stocks_for_plan_generation_data:
         stock_name = stock_info[0]
-        var = ttk.BooleanVar(value=False) # Default to False, user must select
-        # Task 1: Add a little spacing (pady) between checkboxes
+        var = ttk.BooleanVar(value=False)
         chk = ttk.Checkbutton(stocks_frame, text=stock_name, variable=var)
-        chk.pack(anchor=W, pady=2) # Added pady=2 for spacing
+        chk.pack(anchor=W, pady=2)
         selected_stocks_vars[stock_name] = var
 
-    # Plan Type Selection
     plan_type_frame = ttk.Frame(main_frame)
     plan_type_frame.pack(fill=X, pady=(10, 5))
     ttk.Label(plan_type_frame, text="Select Plan Type:", font=("Helvetica", 10)).pack(side=LEFT, padx=(0, 5))
-    plan_type_var = ttk.StringVar(value=initial_plan_type) # Use initial_plan_type
+    plan_type_var = ttk.StringVar(value=initial_plan_type)
     plan_type_combo = ttk.Combobox(plan_type_frame, textvariable=plan_type_var, values=["Swing Trader", "Day Trader"], state="readonly")
     plan_type_combo.pack(side=LEFT, fill=X, expand=True)
 
@@ -280,12 +242,11 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     for var in selected_stocks_vars.values():
         var.trace_add("write", update_generate_button_state)
     
-    update_generate_button_state() # Initial check
+    update_generate_button_state()
 
     def generate_plan_for_selected_action():
-        # Task 2: After the Generate Plan button is clicked...
         selected_stock_details_for_plan = []
-        for stock_data_item in stocks_for_plan_generation_data: # use the passed list
+        for stock_data_item in stocks_for_plan_generation_data:
             stock_name = stock_data_item[0]
             if selected_stocks_vars.get(stock_name) and selected_stocks_vars[stock_name].get():
                 selected_stock_details_for_plan.append(stock_data_item)
@@ -294,23 +255,18 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
             simpledialog.messagebox.showwarning("No Selection", "Please select at least one stock to generate a plan.", parent=plan_window)
             return
 
-        # Call the placeholder algorithm
-        selected_plan_type = plan_type_var.get() # Get selected plan type
+        selected_plan_type = plan_type_var.get()
         generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan, plan_type=selected_plan_type)
         
-        # Open the new window showing generated plans
-        # The original plan_window will be closed by show_generated_plans_window
-        show_generated_plans_window(plan_window.master, generated_plans, plan_window) 
+        show_generated_plans_window(plan_window.master, generated_plans, plan_window)
 
     generate_plan_button.config(command=generate_plan_for_selected_action)
 
-
+# --- Stock Screener/Filter Window (Generator Window) ---
 def open_generator_window():
     """Open a new window for the generator"""
-    generator_window = ttk.Toplevel(title="Stocks Filter System") # Changed title
-    generator_window.geometry("700x650") # Adjusted size for FilterManager and results
-    # generator_window.transient(root) # Keep window on top
-    # generator_window.grab_set() # Make modal
+    generator_window = ttk.Toplevel(title="Stocks Filter System")
+    generator_window.geometry("700x650")
 
     main_gen_frame = ttk.Frame(generator_window, padding=10)
     main_gen_frame.pack(fill=BOTH, expand=True)
@@ -326,12 +282,10 @@ def open_generator_window():
     def set_plan_type_config_callback(plan_type_from_detection, disable_selection_from_detection):
         plan_type_config["type"] = plan_type_from_detection if plan_type_from_detection else "Swing Trader"
         plan_type_config["disabled"] = disable_selection_from_detection
-        # print(f"Debug: Plan type config updated by callback: {plan_type_config}")
-
 
     results_display_frame = ttk.Frame(main_gen_frame)
     results_display_frame.pack(fill=BOTH, expand=True, pady=(0, 10))
-    result_text = ttk.Text(results_display_frame, wrap=WORD, height=10) # Adjusted height
+    result_text = ttk.Text(results_display_frame, wrap=WORD, height=10)
     result_text.pack(fill=BOTH, expand=True, side=LEFT)
     scrollbar = ttk.Scrollbar(results_display_frame, command=result_text.yview)
     scrollbar.pack(fill=Y, side=RIGHT)
@@ -350,14 +304,14 @@ def open_generator_window():
             stocks_for_plan_generation_data=shared_detected_stocks_list,
             initial_plan_type=plan_type_config["type"],
             plan_type_disabled=plan_type_config["disabled"],
-            original_screener_window=None 
+            original_screener_window=None
         )
     )
 
     def progress_callback_impl(message):
         if result_text.winfo_exists():
             root.after(0, lambda: (
-                result_text.insert(END, message + "\n"), 
+                result_text.insert(END, message + "\n"),
                 result_text.see(END)
             ))
 
@@ -399,8 +353,8 @@ def open_generator_window():
             
             if result_text.winfo_exists():
                 result_text.delete(1.0, END)
-            set_continue_button_state_impl(False) 
-            shared_detected_stocks_list.clear() 
+            set_continue_button_state_impl(False)
+            shared_detected_stocks_list.clear()
 
             threading.Thread(
                 target=detect_break_high_price,
@@ -426,53 +380,41 @@ def open_generator_window():
     run_button.pack(side=LEFT, padx=5)
     continue_button.pack(side=LEFT, padx=5)
 
-
+# --- Main Application Page ---
 def show_main_page():
-    global main_plan_display_treeview # Declare global to assign
-    # Remove API check elements
+    global main_plan_display_treeview
     for widget in center_frame.winfo_children():
         widget.destroy()
     
-    # Reset center frame
     center_frame.pack_forget()
     center_frame.place_forget()
     
-    # Main content frame
     main_frame = ttk.Frame(root)
     main_frame.pack(expand=True, fill=BOTH, padx=20, pady=20)
     
-    # Header frame
     header_frame = ttk.Frame(main_frame)
     header_frame.pack(fill=X, pady=(0, 20))
     
-    # Header title
     header_title = ttk.Label(header_frame, text="Trading Plan Generator", font=("Helvetica", 14, "bold"))
     header_title.pack(side=LEFT)
     
-    # Create button
     create_button = ttk.Button(header_frame, text="Create", bootstyle="primary", command=open_generator_window)
-    create_button.pack(side=RIGHT, padx=(5,0)) # Add some padding if it's not the last one
+    create_button.pack(side=RIGHT, padx=(5,0))
 
-    # Manage Plans button
-    manage_plans_button = ttk.Button(header_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root)) # Added
-    manage_plans_button.pack(side=RIGHT, padx=(5,5)) # Added
+    manage_plans_button = ttk.Button(header_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root))
+    manage_plans_button.pack(side=RIGHT, padx=(5,5))
 
-    # Delete All Plans button - positioned to the left of Create
     delete_plans_button = ttk.Button(header_frame, text="Delete All Plans", bootstyle="danger", command=delete_all_saved_plans)
-    delete_plans_button.pack(side=RIGHT, padx=(0, 5)) # padx to add space between Delete and Create
+    delete_plans_button.pack(side=RIGHT, padx=(0, 5))
 
-    # Placeholder for displaying saved trading plans on the main page
-    # This could be a more sophisticated widget or part of a dashboard later
     main_page_display_frame = ttk.Frame(main_frame, padding=(0, 10))
     main_page_display_frame.pack(fill=BOTH, expand=True)
 
     ttk.Label(main_page_display_frame, text="Saved Trading Plans:", font=("Helvetica", 10, "italic")).pack(anchor=W, pady=(5,5))
     
-    # Define columns for the main display Treeview
-    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated columns
+    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date")
     main_plan_display_treeview = ttk.Treeview(main_page_display_frame, columns=plan_columns, show="headings", height=10)
     
-    # Define headings for the Treeview
     main_plan_display_treeview.heading("stock", text="Stock")
     main_plan_display_treeview.heading("entry_price", text="Entry")
     main_plan_display_treeview.heading("stop_loss", text="Stop Loss")
@@ -480,17 +422,16 @@ def show_main_page():
     main_plan_display_treeview.heading("tp2", text="TP2")
     main_plan_display_treeview.heading("tp3", text="TP3")
     main_plan_display_treeview.heading("status", text="Status")
-    main_plan_display_treeview.heading("creation_date", text="Date Created") # Added
+    main_plan_display_treeview.heading("creation_date", text="Date Created")
 
-    # Adjust column widths for the Treeview
     main_plan_display_treeview.column("stock", width=80, anchor=CENTER)
-    main_plan_display_treeview.column("entry_price", width=90, anchor=CENTER) # Adjusted, Changed from E to CENTER
-    main_plan_display_treeview.column("stop_loss", width=90, anchor=CENTER)  # Adjusted, Changed from E to CENTER
-    main_plan_display_treeview.column("tp1", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
-    main_plan_display_treeview.column("tp2", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
-    main_plan_display_treeview.column("tp3", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    main_plan_display_treeview.column("entry_price", width=90, anchor=CENTER)
+    main_plan_display_treeview.column("stop_loss", width=90, anchor=CENTER)
+    main_plan_display_treeview.column("tp1", width=90, anchor=CENTER)
+    main_plan_display_treeview.column("tp2", width=90, anchor=CENTER)
+    main_plan_display_treeview.column("tp3", width=90, anchor=CENTER)
     main_plan_display_treeview.column("status", width=80, anchor=CENTER)
-    main_plan_display_treeview.column("creation_date", width=120, anchor=CENTER) # Added
+    main_plan_display_treeview.column("creation_date", width=120, anchor=CENTER)
 
     main_plan_display_treeview.pack(fill=BOTH, expand=True, side=LEFT)
     
@@ -498,15 +439,14 @@ def show_main_page():
     scrollbar_main_display.pack(fill=Y, side=RIGHT)
     main_plan_display_treeview.config(yscrollcommand=scrollbar_main_display.set)
 
-    # Load and display existing plans from file
     loaded_plans = load_plans_from_file()
     display_plans_in_main_area_placeholder(loaded_plans, main_plan_display_treeview)
 
-# --- Manage Plans Window ---
+# --- Manage Saved Plans Window ---
 def open_manage_plans_window(parent_window):
     manage_window = ttk.Toplevel(parent_window)
     manage_window.title("Manage Saved Trading Plans")
-    manage_window.geometry("800x500") # Adjusted for more columns
+    manage_window.geometry("800x500")
     manage_window.transient(parent_window)
     manage_window.grab_set()
 
@@ -514,12 +454,8 @@ def open_manage_plans_window(parent_window):
     main_manage_frame.pack(fill=BOTH, expand=True)
 
     ttk.Label(main_manage_frame, text="Select plans to delete:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
-
-    # Treeview for displaying plans with checkboxes
-    # We'll need a custom way to handle checkboxes in a treeview or use a list of checkbuttons if simpler
-    # For now, let's set up the treeview structure. The actual selection mechanism will be decided.
     
-    cols = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date") # Updated, removed "select"
+    cols = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date")
     tree_manage = ttk.Treeview(main_manage_frame, columns=cols, show="headings", height=15)
 
     tree_manage.heading("stock", text="Stock")
@@ -529,32 +465,30 @@ def open_manage_plans_window(parent_window):
     tree_manage.heading("tp2", text="TP2")
     tree_manage.heading("tp3", text="TP3")
     tree_manage.heading("status", text="Status")
-    tree_manage.heading("creation_date", text="Date Created") # Added
+    tree_manage.heading("creation_date", text="Date Created")
 
-    # tree_manage.column("select", width=50, anchor=CENTER, stretch=False) # Removed
     tree_manage.column("stock", width=80, anchor=CENTER)
-    tree_manage.column("entry_price", width=90, anchor=CENTER) # Adjusted, Changed from E to CENTER
-    tree_manage.column("stop_loss", width=90, anchor=CENTER)  # Adjusted, Changed from E to CENTER
-    tree_manage.column("tp1", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
-    tree_manage.column("tp2", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
-    tree_manage.column("tp3", width=90, anchor=CENTER)       # Adjusted, Changed from E to CENTER
+    tree_manage.column("entry_price", width=90, anchor=CENTER)
+    tree_manage.column("stop_loss", width=90, anchor=CENTER)
+    tree_manage.column("tp1", width=90, anchor=CENTER)
+    tree_manage.column("tp2", width=90, anchor=CENTER)
+    tree_manage.column("tp3", width=90, anchor=CENTER)
     tree_manage.column("status", width=80, anchor=CENTER)
-    tree_manage.column("creation_date", width=120, anchor=CENTER) # Added
+    tree_manage.column("creation_date", width=120, anchor=CENTER)
 
     tree_manage.pack(fill=BOTH, expand=True, pady=5)
     
     scrollbar_manage_tree = ttk.Scrollbar(main_manage_frame, orient=VERTICAL, command=tree_manage.yview)
     tree_manage.configure(yscrollcommand=scrollbar_manage_tree.set)
-    scrollbar_manage_tree.pack(side=RIGHT, fill=Y, before=tree_manage) # Pack before tree to avoid overlap if not careful
+    scrollbar_manage_tree.pack(side=RIGHT, fill=Y, before=tree_manage)
 
     def populate_manage_plans_tree():
-        # Clear existing items
         for item in tree_manage.get_children():
             tree_manage.delete(item)
 
         current_plans = load_plans_from_file()
         if not current_plans:
-            tree_manage.insert("", END, values=("No plans saved.", "", "", "", "", "", "", "")) # Adjusted for removed column
+            tree_manage.insert("", END, values=("No plans saved.", "", "", "", "", "", "", ""))
             return
 
         for i, plan_data in enumerate(current_plans):
@@ -565,36 +499,28 @@ def open_manage_plans_window(parent_window):
             tp2 = plan_data.get("tp2", "N/A")
             tp3 = plan_data.get("tp3", "N/A")
             status = plan_data.get("status", "Pending")
-            creation_date = plan_data.get("creation_date", "N/A") # Added
+            creation_date = plan_data.get("creation_date", "N/A")
             
-            # For selection, we'll use the treeview's built-in selection mechanism
-            # and then retrieve selected items. Checkboxes in each row are complex.
-            # Instead, we allow multi-selection in the treeview.
-            item_id = tree_manage.insert("", END, values=(stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,)) # Adjusted for removed column
-            # The first column is kept empty for now, could be used for a visual cue later if needed
+            item_id = tree_manage.insert("", END, values=(stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,))
 
     populate_manage_plans_tree()
-    tree_manage.config(selectmode="extended") # Allow multiple selections
+    tree_manage.config(selectmode="extended")
 
-    # Button frame
     button_manage_frame = ttk.Frame(main_manage_frame)
     button_manage_frame.pack(fill=X, pady=(10, 0))
 
     def delete_selected_action():
-        selected_item_ids = tree_manage.selection() # Get selected item IDs
+        selected_item_ids = tree_manage.selection()
         if not selected_item_ids:
             simpledialog.messagebox.showwarning("No Selection", "Please select at least one plan to delete.", parent=manage_window)
             return
 
         stocks_to_delete = set()
         for item_id in selected_item_ids:
-            # Retrieve the stock name from the item's values or tags
-            # Assuming stock name is unique and stored as a tag or in a specific column
             item_values = tree_manage.item(item_id, "values")
-            if item_values and len(item_values) > 0: # Check if item_values is not empty
-                 # Assuming stock is the first column (index 0) now that 'select' is removed
+            if item_values and len(item_values) > 0:
                 stock_name = item_values[0]
-                if stock_name != "No plans saved.": # Ensure it's a valid stock
+                if stock_name != "No plans saved.":
                     stocks_to_delete.add(stock_name)
             
         if not stocks_to_delete:
@@ -611,24 +537,13 @@ def open_manage_plans_window(parent_window):
             current_plans = load_plans_from_file()
             plans_to_keep = [plan for plan in current_plans if plan.get("stock") not in stocks_to_delete]
             
-            # Attempt to save the filtered list
-            # We re-use save_plans_to_file by passing the complete list of plans to keep.
-            # This function internally converts to dict by stock and then back to list, effectively overwriting.
-            
-            # To truly overwrite with a potentially smaller list using the current save_plans_to_file,
-            # we must ensure it writes the provided list directly, not merge.
-            # Let's adjust save_plans_to_file to handle this, or make a specific "overwrite" save.
-            # For now, let's assume save_plans_to_file needs to be more flexible or we need a new one.
-            # Let's create a more direct save for this purpose to avoid complexity with the existing one.
-            
             try:
                 with open(SAVED_PLANS_FILE, "w") as f:
                     json.dump(plans_to_keep, f, indent=4)
                 simpledialog.messagebox.showinfo("Success", f"{len(stocks_to_delete)} plan(s) deleted successfully.", parent=manage_window)
                 
-                # Refresh displays
-                populate_manage_plans_tree() # Refresh this window's tree
-                if main_plan_display_treeview: # Refresh main window's tree
+                populate_manage_plans_tree()
+                if main_plan_display_treeview:
                     display_plans_in_main_area_placeholder(plans_to_keep, main_plan_display_treeview)
             
             except IOError as e:
@@ -636,13 +551,13 @@ def open_manage_plans_window(parent_window):
         else:
             simpledialog.messagebox.showinfo("Cancelled", "Delete operation cancelled.", parent=manage_window)
 
-
     close_button = ttk.Button(button_manage_frame, text="Close", command=manage_window.destroy, bootstyle="secondary")
     close_button.pack(side=LEFT, padx=5)
 
     delete_selected_button = ttk.Button(button_manage_frame, text="Delete Selected", command=delete_selected_action, bootstyle="danger")
     delete_selected_button.pack(side=RIGHT, padx=5)
 
+# --- API Availability Check ---
 def check_api_availability(max_retries=10):
     base_url = "https://yfinance-web-indonesia-data.vercel.app"
     endpoints = [
@@ -657,7 +572,6 @@ def check_api_availability(max_retries=10):
                 if response.status_code == 200:
                     root.after(0, lambda: api_status_label.config(text="API is available!"))
                     spinner.stop()
-                    # Show main page after successful API check
                     root.after(1000, show_main_page)
                     return
                 else:
@@ -672,5 +586,6 @@ def check_api_availability(max_retries=10):
 def start_api_check():
     threading.Thread(target=check_api_availability, daemon=True).start()
 
+# --- Application Start ---
 root.after(100, start_api_check)
 root.mainloop()

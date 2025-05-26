@@ -271,7 +271,7 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
         ax_price.yaxis.label.set_color('lightgray')
         ax_volume.yaxis.label.set_color('lightgray')
 
-        fig.suptitle(f"{stock_symbol} - Last 6 Months", color='lightgray', fontsize=10)
+        fig.suptitle(f"{stock_symbol} - Last 1 Year", color='lightgray', fontsize=10)
         fig.subplots_adjust(bottom=0.05, top=0.92)
 
         canvas = FigureCanvasTkAgg(fig, master=parent_tk_frame)
