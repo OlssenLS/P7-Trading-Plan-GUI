@@ -24,10 +24,21 @@ from trendLineManualConfirm import open_trend_line_confirmation_window
 
 SAVED_PLANS_FILE = os.path.join(DATA_DIR, "saved_trading_plans.json")
 
-root = ttk.Window(themename="cyborg")
+def center_toplevel_window(window):
+    window.update_idletasks() 
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    window_width = window.winfo_width()
+    window_height = window.winfo_height()
+    x = (screen_width // 2) - (window_width // 2)
+    y = (screen_height // 2) - (window_height // 2)
+    window.geometry(f'+{x}+{y}')
+
+root = ttk.Window(themename="superhero")
 root.title("Trading Plan Generator")
-root.geometry("1200x600")
+root.geometry("800x600")
 root.resizable(True, True)
+center_toplevel_window(root)
 
 center_frame = ttk.Frame(root)
 center_frame.pack(expand=True, fill=BOTH)
@@ -121,6 +132,7 @@ def show_generated_plans_window(parent_window, generated_plans, original_plan_wi
     gen_plans_window.geometry("700x500")
     gen_plans_window.transient(parent_window)
     gen_plans_window.grab_set()
+    center_toplevel_window(gen_plans_window)
 
     main_gen_frame = ttk.Frame(gen_plans_window, padding=10)
     main_gen_frame.pack(fill=BOTH, expand=True)
@@ -194,6 +206,7 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     plan_window.geometry("400x500")
     plan_window.transient(parent_window)
     plan_window.grab_set()
+    center_toplevel_window(plan_window)
 
     if not stocks_for_plan_generation_data:
         ttk.Label(plan_window, text="No stocks available or selected from screener for plan generation.", padding=20).pack()
@@ -267,6 +280,7 @@ def open_generator_window():
     """Open a new window for the generator"""
     generator_window = ttk.Toplevel(title="Stocks Filter System")
     generator_window.geometry("700x650")
+    center_toplevel_window(generator_window)
 
     main_gen_frame = ttk.Frame(generator_window, padding=10)
     main_gen_frame.pack(fill=BOTH, expand=True)
@@ -397,22 +411,26 @@ def show_main_page():
     
     header_title = ttk.Label(header_frame, text="Trading Plan Generator", font=("Helvetica", 14, "bold"))
     header_title.pack(side=LEFT)
-    
-    create_button = ttk.Button(header_frame, text="Create", bootstyle="primary", command=open_generator_window)
-    create_button.pack(side=RIGHT, padx=(5,0))
 
-    manage_plans_button = ttk.Button(header_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root))
-    manage_plans_button.pack(side=RIGHT, padx=(5,5))
+    # Sidebar Frame
+    sidebar_frame = ttk.Frame(main_frame, width=150)
+    sidebar_frame.pack(side=LEFT, fill=Y, padx=(0, 10), pady=(0,10))
 
-    delete_plans_button = ttk.Button(header_frame, text="Delete All Plans", bootstyle="danger", command=delete_all_saved_plans)
-    delete_plans_button.pack(side=RIGHT, padx=(0, 5))
+    create_button = ttk.Button(sidebar_frame, text="Create", bootstyle="primary", command=open_generator_window)
+    create_button.pack(pady=5, fill=X)
+
+    manage_plans_button = ttk.Button(sidebar_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root))
+    manage_plans_button.pack(pady=5, fill=X)
+
+    delete_plans_button = ttk.Button(sidebar_frame, text="Delete All Plans", bootstyle="danger", command=delete_all_saved_plans)
+    delete_plans_button.pack(pady=5, fill=X)
 
     main_page_display_frame = ttk.Frame(main_frame, padding=(0, 10))
-    main_page_display_frame.pack(fill=BOTH, expand=True)
+    main_page_display_frame.pack(side=LEFT, fill=BOTH, expand=True)
 
     ttk.Label(main_page_display_frame, text="Saved Trading Plans:", font=("Helvetica", 10, "italic")).pack(anchor=W, pady=(5,5))
     
-    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date")
+    plan_columns = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "creation_date")
     main_plan_display_treeview = ttk.Treeview(main_page_display_frame, columns=plan_columns, show="headings", height=10)
     
     main_plan_display_treeview.heading("stock", text="Stock")
@@ -421,7 +439,6 @@ def show_main_page():
     main_plan_display_treeview.heading("tp1", text="TP1")
     main_plan_display_treeview.heading("tp2", text="TP2")
     main_plan_display_treeview.heading("tp3", text="TP3")
-    main_plan_display_treeview.heading("status", text="Status")
     main_plan_display_treeview.heading("creation_date", text="Date Created")
 
     main_plan_display_treeview.column("stock", width=80, anchor=CENTER)
@@ -430,7 +447,6 @@ def show_main_page():
     main_plan_display_treeview.column("tp1", width=90, anchor=CENTER)
     main_plan_display_treeview.column("tp2", width=90, anchor=CENTER)
     main_plan_display_treeview.column("tp3", width=90, anchor=CENTER)
-    main_plan_display_treeview.column("status", width=80, anchor=CENTER)
     main_plan_display_treeview.column("creation_date", width=120, anchor=CENTER)
 
     main_plan_display_treeview.pack(fill=BOTH, expand=True, side=LEFT)
@@ -449,13 +465,14 @@ def open_manage_plans_window(parent_window):
     manage_window.geometry("800x500")
     manage_window.transient(parent_window)
     manage_window.grab_set()
+    center_toplevel_window(manage_window)
 
     main_manage_frame = ttk.Frame(manage_window, padding=10)
     main_manage_frame.pack(fill=BOTH, expand=True)
 
     ttk.Label(main_manage_frame, text="Select plans to delete:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,10))
     
-    cols = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "status", "creation_date")
+    cols = ("stock", "entry_price", "stop_loss", "tp1", "tp2", "tp3", "creation_date")
     tree_manage = ttk.Treeview(main_manage_frame, columns=cols, show="headings", height=15)
 
     tree_manage.heading("stock", text="Stock")
@@ -464,7 +481,6 @@ def open_manage_plans_window(parent_window):
     tree_manage.heading("tp1", text="TP1")
     tree_manage.heading("tp2", text="TP2")
     tree_manage.heading("tp3", text="TP3")
-    tree_manage.heading("status", text="Status")
     tree_manage.heading("creation_date", text="Date Created")
 
     tree_manage.column("stock", width=80, anchor=CENTER)
@@ -473,7 +489,6 @@ def open_manage_plans_window(parent_window):
     tree_manage.column("tp1", width=90, anchor=CENTER)
     tree_manage.column("tp2", width=90, anchor=CENTER)
     tree_manage.column("tp3", width=90, anchor=CENTER)
-    tree_manage.column("status", width=80, anchor=CENTER)
     tree_manage.column("creation_date", width=120, anchor=CENTER)
 
     tree_manage.pack(fill=BOTH, expand=True, pady=5)
@@ -488,7 +503,7 @@ def open_manage_plans_window(parent_window):
 
         current_plans = load_plans_from_file()
         if not current_plans:
-            tree_manage.insert("", END, values=("No plans saved.", "", "", "", "", "", "", ""))
+            tree_manage.insert("", END, values=("No plans saved.", "", "", "", "", "", ""))
             return
 
         for i, plan_data in enumerate(current_plans):
@@ -498,10 +513,9 @@ def open_manage_plans_window(parent_window):
             tp1 = plan_data.get("tp1", "N/A")
             tp2 = plan_data.get("tp2", "N/A")
             tp3 = plan_data.get("tp3", "N/A")
-            status = plan_data.get("status", "Pending")
             creation_date = plan_data.get("creation_date", "N/A")
             
-            item_id = tree_manage.insert("", END, values=(stock, entry, sl, tp1, tp2, tp3, status, creation_date), tags=(stock,))
+            item_id = tree_manage.insert("", END, values=(stock, entry, sl, tp1, tp2, tp3, creation_date), tags=(stock,))
 
     populate_manage_plans_tree()
     tree_manage.config(selectmode="extended")

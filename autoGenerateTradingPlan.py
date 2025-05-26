@@ -119,7 +119,7 @@ def display_plans_in_main_area_placeholder(plans, main_text_widget):
             main_plan_treeview.delete(item)
 
         if not plans:
-            main_plan_treeview.insert("", END, values=("No plans to display.", "", "", "", "", "", "", ""))
+            main_plan_treeview.insert("", END, values=("No plans.", "", "", "", "", "", "", ""))
             return
 
         for plan in plans:

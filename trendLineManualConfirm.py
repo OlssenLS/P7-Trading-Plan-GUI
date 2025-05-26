@@ -14,6 +14,16 @@ import traceback # For error printing in generate_candlestick_chart
 
 # --- Helper functions based on the Medium article ---
 
+def center_toplevel_window(window):
+    window.update_idletasks() 
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    window_width = window.winfo_width()
+    window_height = window.winfo_height()
+    x = (screen_width // 2) - (window_width // 2)
+    y = (screen_height // 2) - (window_height // 2)
+    window.geometry(f'+{x}+{y}')
+
 def isPivot(df_for_pivot, candle_index, window):
     """
     Detects if a candle is a pivot/fractal point.
@@ -364,10 +374,8 @@ def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_
         yes_button = ttk.Button(buttons_frame, text="Yes (Include)", bootstyle="success", command=lambda: handle_decision(True))
         yes_button.pack(side=RIGHT, padx=10)
         
-        confirmation_dialog.update_idletasks()
-        x = parent_window_for_dialogs.winfo_x() + (parent_window_for_dialogs.winfo_width() // 2) - (confirmation_dialog.winfo_width() // 2)
-        y = parent_window_for_dialogs.winfo_y() + (parent_window_for_dialogs.winfo_height() // 2) - (confirmation_dialog.winfo_height() // 2)
-        confirmation_dialog.geometry(f"+{x}+{y}")
+        # Center the dialog
+        center_toplevel_window(confirmation_dialog)
         confirmation_dialog.focus_set()
 
     if not all_detected_stocks:
