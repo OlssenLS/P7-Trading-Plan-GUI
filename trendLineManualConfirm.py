@@ -9,10 +9,10 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import mplfinance as mpf
 import numpy as np
-# from scipy import stats # Removed: numpy.polyfit is used instead
-import traceback # For error printing in generate_candlestick_chart
+import traceback # For error printing
+from sklearn.cluster import KMeans # Added for K-Means clustering
 
-# --- Helper functions based on the Medium article ---
+# --- Helper functions based on articles ---
 
 def center_toplevel_window(window):
     window.update_idletasks() 
@@ -24,114 +24,27 @@ def center_toplevel_window(window):
     y = (screen_height // 2) - (window_height // 2)
     window.geometry(f'+{x}+{y}')
 
-def isPivot(df_for_pivot, candle_index, window):
+# --- K-Means Helper Function (Optional - can be integrated directly) ---
+# Placeholder if more complex K-Means logic is needed separately
+# def calculate_kmeans_sr_levels(price_data_series, n_clusters=6):
+#     if len(price_data_series) < n_clusters:
+#         print("Not enough data points for K-Means clustering.")
+#         return []
+#     try:
+#         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init='auto')
+#         kmeans.fit(price_data_series.values.reshape(-1, 1))
+#         sr_levels = sorted(kmeans.cluster_centers_.flatten())
+#         return sr_levels
+#     except Exception as e:
+#         print(f"K-Means calculation failed: {e}")
+#         return []
+
+# --- Main Chart Generation Function ---
+def generate_candlestick_chart(stock_symbol, parent_tk_frame, show_kmeans_sr_lines=True):
     """
-    Detects if a candle is a pivot/fractal point.
-    Args:
-        df_for_pivot: DataFrame containing the price data (must have 'Low' and 'High' columns)
-        candle_index: index of the candle in the DataFrame
-        window: number of candles before and after the current candle to consider
-    Returns:
-        1 if pivot high, 2 if pivot low, 3 if both, 0 otherwise.
-    """
-    if candle_index - window < 0 or candle_index + window >= len(df_for_pivot):
-        return 0
-
-    pivotHigh = 1
-    pivotLow = 2
-    # Ensure we are using .iloc for positional indexing if candle_index is an integer offset
-    # If candle_index is a label (like a datetime), df_for_pivot.loc[candle_index] is fine
-    # Assuming candle_index here is an integer offset for .iloc access
-    
-    # Determine actual iloc-based indices for window
-    start_iloc = max(0, candle_index - window)
-    end_iloc = min(len(df_for_pivot), candle_index + window + 1)
-    
-    current_candle_low = df_for_pivot.iloc[candle_index]['Low']
-    current_candle_high = df_for_pivot.iloc[candle_index]['High']
-
-    for i in range(start_iloc, end_iloc):
-        if i == candle_index:
-            continue
-        if current_candle_low > df_for_pivot.iloc[i]['Low']:
-            pivotLow = 0
-        if current_candle_high < df_for_pivot.iloc[i]['High']:
-            pivotHigh = 0
-    
-    if pivotHigh and pivotLow:
-        return 3
-    elif pivotHigh:
-        return 1
-    elif pivotLow:
-        return 2
-    else:
-        return 0
-
-def collect_channel(df_for_channel, candle_index, backcandles, window):
-    """
-    Analyzes a window of candles to determine linear regression lines for high and low channels.
-    Args:
-        df_for_channel: DataFrame with price data.
-        candle_index: The CURRENT candle index for which we are looking back to define channels.
-        backcandles: Number of candles to look back from candle_index to define the channel.
-        window: Window for pivot detection.
-    Returns:
-        Tuple (sl_lows, interc_lows, r_sq_l, num_low_pivots,
-               sl_highs, interc_highs, r_sq_h, num_high_pivots)
-    """
-    start_index_for_pivots = max(0, candle_index - backcandles)
-    end_index_for_pivots = candle_index + 1
-
-    localdf_for_pivots = df_for_channel.iloc[start_index_for_pivots:end_index_for_pivots].copy()
-
-    if localdf_for_pivots.empty or len(localdf_for_pivots) < window * 2 + 1:
-        return (0, 0, 0, 0, 0, 0, 0, 0) # sl, int, rsq, num_pivots for low & high
-
-    pivots = [isPivot(localdf_for_pivots, i, window) for i in range(len(localdf_for_pivots))]
-    localdf_for_pivots['Pivot'] = pivots
-
-    highs_df = localdf_for_pivots[localdf_for_pivots['Pivot'] == 1] # Pivot High
-    lows_df = localdf_for_pivots[(localdf_for_pivots['Pivot'] == 2) | (localdf_for_pivots['Pivot'] == 3)] # Pivot Low or Both
-
-    idxhighs = highs_df.index.astype(np.int64)
-    high_prices = highs_df['High'].values
-    num_high_pivots = len(high_prices)
-
-    idxlows = lows_df.index.astype(np.int64)
-    low_prices = lows_df['Low'].values
-    num_low_pivots = len(low_prices)
-
-    sl_lows, interc_lows, r_sq_l = 0, 0, 0
-    sl_highs, interc_highs, r_sq_h = 0, 0, 0
-
-    min_pivots_for_line = 2
-
-    if num_low_pivots >= min_pivots_for_line:
-        res_lows = np.polyfit(idxlows, low_prices, 1)
-        sl_lows, interc_lows = res_lows[0], res_lows[1]
-        y_pred_lows = sl_lows * idxlows + interc_lows
-        ss_res_lows = np.sum((low_prices - y_pred_lows)**2)
-        ss_tot_lows = np.sum((low_prices - np.mean(low_prices))**2)
-        r_sq_l = 1 - (ss_res_lows / ss_tot_lows) if ss_tot_lows > 0 else 0
-
-    if num_high_pivots >= min_pivots_for_line:
-        res_highs = np.polyfit(idxhighs, high_prices, 1)
-        sl_highs, interc_highs = res_highs[0], res_highs[1]
-        y_pred_highs = sl_highs * idxhighs + interc_highs
-        ss_res_highs = np.sum((high_prices - y_pred_highs)**2)
-        ss_tot_highs = np.sum((high_prices - np.mean(high_prices))**2)
-        r_sq_h = 1 - (ss_res_highs / ss_tot_highs) if ss_tot_highs > 0 else 0
-        
-    return (sl_lows, interc_lows, r_sq_l, num_low_pivots,
-            sl_highs, interc_highs, r_sq_h, num_high_pivots)
-
-# --- End of helper functions ---
-
-# Moved from main.py
-def generate_candlestick_chart(stock_symbol, parent_tk_frame):
-    """
-    Generates a candlestick chart for the given stock symbol for the last 6 months
+    Generates a candlestick chart for the given stock symbol for the last 1 year
     and embeds it into the parent_tk_frame.
+    Includes K-Means based support/resistance lines if show_kmeans_sr_lines is True.
     Returns the FigureCanvasTkAgg widget or None.
     """
     try:
@@ -147,18 +60,56 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
             print(f"No historical data for {stock_symbol} for chart.")
             return None
 
-        df = pd.DataFrame(stock_data["historical_data"])
-        if df.empty:
+        df_from_api = pd.DataFrame(stock_data["historical_data"])
+        if df_from_api.empty:
             print(f"DataFrame empty for {stock_symbol}.")
             return None
 
-        df['date'] = pd.to_datetime(df['date'])
-        df.set_index('date', inplace=True)
-        df.rename(columns={'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'}, inplace=True)
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-        df = df.astype(float)
+        df_for_plotting = df_from_api.copy()
+        df_for_plotting['Date'] = pd.to_datetime(df_for_plotting['date'])
+        df_for_plotting.rename(columns={
+            'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'
+        }, inplace=True)
+        df_for_plotting = df_for_plotting[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+        df_for_plotting = df_for_plotting.astype({'Open': float, 'High': float, 'Low': float, 'Close': float, 'Volume': float})
+        df_for_plotting.sort_values(by='Date', inplace=True)
+        df_for_plotting.set_index('Date', inplace=True)
 
-        # Custom mplfinance style
+        alines_data = []
+        line_colors = []
+
+        # --- K-Means Support/Resistance Calculation ---
+        if show_kmeans_sr_lines:
+            n_clusters_kmeans = 6 # Number of clusters for K-Means
+            
+            # Prepare data for K-Means (using average of High and Low prices)
+            if not df_for_plotting.empty and all(col in df_for_plotting for col in ['High', 'Low']):
+                # Use a copy to avoid SettingWithCopyWarning if df_for_plotting is a slice
+                prices_df_for_kmeans = df_for_plotting[['High', 'Low']].copy()
+                prices_for_kmeans_series = (prices_df_for_kmeans['High'] + prices_df_for_kmeans['Low']) / 2
+                
+                if len(prices_for_kmeans_series) >= n_clusters_kmeans:
+                    try:
+                        kmeans = KMeans(n_clusters=n_clusters_kmeans, random_state=42, n_init='auto')
+                        kmeans.fit(prices_for_kmeans_series.values.reshape(-1, 1))
+                        sr_levels = sorted(kmeans.cluster_centers_.flatten())
+                        
+                        date_start_for_lines = df_for_plotting.index[0]
+                        date_end_for_lines = df_for_plotting.index[-1]
+                        
+                        for level in sr_levels:
+                            alines_data.append([(date_start_for_lines, level), (date_end_for_lines, level)])
+                            line_colors.append('blue') # Changed color to blue
+                        print(f"INFO: {stock_symbol} - K-Means S/R lines added ({len(sr_levels)} levels).")
+                    except Exception as kmeans_exc:
+                        print(f"ERROR: {stock_symbol} - K-Means calculation failed: {kmeans_exc}")
+                        traceback.print_exc()
+                else:
+                    print(f"INFO: {stock_symbol} - Not enough data points for K-Means ({len(prices_for_kmeans_series)} points, need {n_clusters_kmeans}).")
+            else:
+                print(f"INFO: {stock_symbol} - Data for K-Means not available (High/Low columns missing or empty DataFrame).")
+        # --- End of K-Means Support/Resistance Calculation ---
+        
         mc = mpf.make_marketcolors(up='#00ff00', down='#ff0000', inherit=True)
         s = mpf.make_mpf_style(base_mpf_style='nightclouds', marketcolors=mc,
                                figcolor='k', facecolor='k',
@@ -167,109 +118,26 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
                                    'xtick.color':'k', 'axes.labelcolor':'lightgray',
                                    'axes.edgecolor':'gray', 'axes.titlecolor':'lightgray', 
                                    'ytick.color':'lightgray', 'axes.facecolor':'k'})
-
-        # --- Trend Line Calculation using new channel logic ---
-        alines_data = []
-        line_colors = []
-
-        # Parameters for channel detection (can be tuned)
-        backcandles_channel = 60 # Number of past candles to consider for channel formation
-        window_pivot = 4       # Window for pivot detection (n candles before and after)
-
-        # We need to pass the DataFrame with 'Low' and 'High' columns to isPivot and collect_channel
-        # The 'collect_channel' function expects candle_index to be the *current* end point for channel calculation.
-        # For plotting, we usually want the channel over the whole period or a significant recent part.
-        # Let's try to calculate channels based on pivots found in the entire df.
-        # The article's 'collect_channel' is designed to be called for *each* candle to see if a breakout is occurring.
-        # For visualization, we might want one set of channels for the displayed period.
-
-        # The df needs integer-based index for polyfit if we use df.index directly.
-        # Or, we can use np.arange(len(df)) for x-values in regression.
-        # Let's use np.arange(len(df)) for regression to keep it simple.
-        df_for_channels = df.reset_index() # Adds 'index' column, keeps 'date'
         
-        # Calculate pivots for the entire DataFrame first
-        # df_for_channels['Pivot'] = [isPivot(df_for_channels, i, window_pivot) for i in range(len(df_for_channels))]
-
-        # Call collect_channel. The 'candle_index' here means the end of the period for which channel is calculated.
-        # For a static chart, we calculate it once for the whole period, so candle_index = len(df_for_channels) - 1
-        
-        # Reset index for df_for_channels so iloc and index based operations are consistent
-        # This also means 'idxhighs' and 'idxlows' in collect_channel will be simple integer sequences
-        df_reg = df.copy()
-        df_reg.reset_index(drop=True, inplace=True) # Now index is 0, 1, 2...
-
-        sl_lows, interc_lows, r_sq_l, num_low_pivots, \
-        sl_highs, interc_highs, r_sq_h, num_high_pivots = collect_channel(
-            df_reg,
-            len(df_reg) - 1,
-            backcandles_channel,
-            window_pivot
-        )
-
-        # Debug prints
-        print(f"DEBUG: Stock {stock_symbol} - Lows: Pivots={num_low_pivots}, Slope={sl_lows:.2f}, Intercept={interc_lows:.2f}, R^2={r_sq_l:.2f}")
-        print(f"DEBUG: Stock {stock_symbol} - Highs: Pivots={num_high_pivots}, Slope={sl_highs:.2f}, Intercept={interc_highs:.2f}, R^2={r_sq_h:.2f}")
-
-        min_pivots_for_drawing = 2 # Consistent with collect_channel logic
-
-        # Define the drawing range (last backcandles_channel period)
-        numeric_idx_end_draw = len(df_reg) - 1
-        numeric_idx_start_draw = max(0, numeric_idx_end_draw - backcandles_channel)
-        
-        date_start_draw = df.index[numeric_idx_start_draw]
-        date_end_draw = df.index[numeric_idx_end_draw]
-
-        # Placeholder for support line data if drawn, needed for resistance check
-        support_line_drawn = False
-        y_start_low_check, y_end_low_check = 0, 0
-
-        if num_low_pivots >= min_pivots_for_drawing:
-            y_start_low = sl_lows * numeric_idx_start_draw + interc_lows
-            y_end_low = sl_lows * numeric_idx_end_draw + interc_lows
-            alines_data.append([(date_start_draw, y_start_low), (date_end_draw, y_end_low)])
-            line_colors.append('blue') 
-            support_line_drawn = True
-            y_start_low_check = y_start_low
-            y_end_low_check = y_end_low
-        else:
-            print(f"INFO: {stock_symbol} - Not enough low pivots ({num_low_pivots}) to draw support line.")
-
-        if num_high_pivots >= min_pivots_for_drawing:
-            y_start_high = sl_highs * numeric_idx_start_draw + interc_highs
-            y_end_high = sl_highs * numeric_idx_end_draw + interc_highs
-            
-            draw_resistance_line = True
-            if support_line_drawn:
-                # Check 1: Resistance entirely below support in the drawn segment
-                if y_start_high < y_start_low_check and y_end_high < y_end_low_check:
-                    print(f"WARNING: {stock_symbol} - Resistance line is entirely below support line for the drawn segment. Not drawing resistance line.")
-                    draw_resistance_line = False
-                # Check 2: Lines cross within the drawn segment
-                # Corrected crossing logic:
-                # (starts above, ends below) OR (starts below, ends above)
-                elif (y_start_high > y_start_low_check and y_end_high < y_end_low_check) or \
-                     (y_start_high < y_start_low_check and y_end_high > y_end_low_check):
-                     print(f"WARNING: {stock_symbol} - Resistance line crosses support line within the drawn segment. Not drawing resistance line.")
-                     draw_resistance_line = False
-
-            if draw_resistance_line:
-                alines_data.append([(date_start_draw, y_start_high), (date_end_draw, y_end_high)])
-                line_colors.append('red')
-        else:
-            print(f"INFO: {stock_symbol} - Not enough high pivots ({num_high_pivots}) to draw resistance line.")
-
         fig = plt.Figure(facecolor='k')
         gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1], hspace=0.0)
         ax_price = fig.add_subplot(gs[0,0], facecolor='k')
         ax_volume = fig.add_subplot(gs[1,0], facecolor='k', sharex=ax_price)
 
-        mpf.plot(df, type='candle', style=s, 
-                 ax=ax_price,
-                 volume=ax_volume,
-                 show_nontrading=False,
-                 alines=dict(alines=alines_data, colors=line_colors)
-                )
+        plot_kwargs = {
+            'type': 'candle',
+            'style': s,
+            'ax': ax_price,
+            'volume': ax_volume,
+            'show_nontrading': False
+        }
+        if alines_data:
+            plot_kwargs['alines'] = dict(alines=alines_data, 
+                                         colors=line_colors, 
+                                         linestyle='dashed',
+                                         linewidths=0.5)
+
+        mpf.plot(df_for_plotting, **plot_kwargs)
         
         ax_price.set_xticklabels([])
         ax_price.set_xticks([])
@@ -281,7 +149,7 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
         ax_price.yaxis.label.set_color('lightgray')
         ax_volume.yaxis.label.set_color('lightgray')
 
-        fig.suptitle(f"{stock_symbol} - Last 1 Year", color='lightgray', fontsize=10)
+        fig.suptitle(f"{stock_symbol} - Last 1 Year (K-Means S/R)", color='lightgray', fontsize=10)
         fig.subplots_adjust(bottom=0.05, top=0.92)
 
         canvas = FigureCanvasTkAgg(fig, master=parent_tk_frame)
@@ -294,18 +162,34 @@ def generate_candlestick_chart(stock_symbol, parent_tk_frame):
     except requests.exceptions.RequestException as e:
         print(f"API request error for {stock_symbol} chart: {e}")
         return None
+    except ImportError as e:
+        print(f"ImportError during chart generation: {e}")
+        traceback.print_exc()
+        error_label = ttk.Label(parent_tk_frame, text=f"Error: A required library might be missing (e.g., scikit-learn).", foreground="red")
+        error_label.pack(pady=10, fill=BOTH, expand=True)
+        return None
     except Exception as e:
         print(f"Error generating candlestick chart for {stock_symbol}: {e}")
         traceback.print_exc()
         return None
 
-# Moved from main.py
+# --- Trend Line Confirmation Window ---
 def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_stocks, summary_text_original, final_status_original, original_completion_callback, original_set_continue_button_state_callback, original_shared_detected_stocks_list_ref):
     
     confirmed_stocks_accumulator = []
     stocks_to_review = list(all_detected_stocks) 
+    
+    # Store canvas objects to manage them
+    current_chart_canvas_obj = None
 
     def _show_next_stock_confirmation(current_stock_list_to_review):
+        nonlocal current_chart_canvas_obj # To manage destroying old canvas
+
+        if current_chart_canvas_obj and current_chart_canvas_obj.get_tk_widget().winfo_exists():
+            current_chart_canvas_obj.get_tk_widget().destroy()
+            plt.close(current_chart_canvas_obj.figure) # Close the matplotlib figure
+            current_chart_canvas_obj = None
+
         if not current_stock_list_to_review:
             original_shared_detected_stocks_list_ref.clear()
             original_shared_detected_stocks_list_ref.extend(confirmed_stocks_accumulator)
@@ -313,15 +197,15 @@ def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_
             num_confirmed = len(confirmed_stocks_accumulator)
             num_total_detected = len(all_detected_stocks)
             
-            updated_summary_text = f"Trend Line Review Complete. {num_confirmed} of {num_total_detected} stocks confirmed for plan generation.\n\n"
+            updated_summary_text = f"K-Means S/R Line Review Complete. {num_confirmed} of {num_total_detected} stocks confirmed for plan generation.\n\n"
             if confirmed_stocks_accumulator:
                 updated_summary_text += "Confirmed Stocks:\n"
                 for stock_data in confirmed_stocks_accumulator:
-                    updated_summary_text += f"- {stock_data[0]}\n"
+                    updated_summary_text += f"- {stock_data[0]}\n" # Assuming stock_data is a tuple/list with name at index 0
             
             updated_final_status = f"Proceeding with {num_confirmed} confirmed stocks."
             if num_confirmed == 0:
-                updated_final_status = "No stocks were confirmed after trend line review. No plans will be generated."
+                updated_final_status = "No stocks were confirmed after K-Means S/R line review. No plans will be generated."
 
             original_completion_callback(confirmed_stocks_accumulator, updated_summary_text, updated_final_status)
             
@@ -329,44 +213,71 @@ def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_
                 original_set_continue_button_state_callback(True)
             else:
                 original_set_continue_button_state_callback(False)
+            
+            # Explicitly destroy dialog if it's still alive (e.g. if the last stock was processed)
+            # This assumes the dialog is tied to the lifecycle of _show_next_stock_confirmation's calls.
+            # It's better to destroy the dialog in handle_decision after the last stock.
+            # For now, this path means the process is complete.
+            if 'confirmation_dialog' in locals() and confirmation_dialog.winfo_exists():
+                 confirmation_dialog.destroy()
             return
 
-        stock_to_confirm = current_stock_list_to_review.pop(0)
-        stock_name = stock_to_confirm[0]
+        stock_to_confirm_data = current_stock_list_to_review.pop(0)
+        stock_name = stock_to_confirm_data[0] # Assuming stock name is the first element
 
         confirmation_dialog = ttk.Toplevel(parent_window_for_dialogs)
-        confirmation_dialog.title(f"Confirm Trend Line: {stock_name}")
-        confirmation_dialog.geometry("1280x720")
+        confirmation_dialog.title(f"Confirm K-Means S/R: {stock_name}")
+        confirmation_dialog.geometry("1280x760") # Slightly increased height for checkbox
         confirmation_dialog.transient(parent_window_for_dialogs)
         confirmation_dialog.grab_set()
         confirmation_dialog.resizable(True, True)
 
         dialog_main_frame = ttk.Frame(confirmation_dialog, padding=15)
         dialog_main_frame.pack(fill=BOTH, expand=True)
-
-        ttk.Label(dialog_main_frame, text=f"Stock: {stock_name}", font=("Helvetica", 14, "bold")).pack(pady=(0,10), side=TOP)
         
-        chart_frame = ttk.Frame(dialog_main_frame)
-        chart_frame.pack(pady=10, fill=BOTH, expand=True, side=TOP)
+        # --- UI Elements ---
+        stock_label = ttk.Label(dialog_main_frame, text=f"Stock: {stock_name}", font=("Helvetica", 14, "bold"))
+        stock_label.pack(pady=(0,5), side=TOP)
 
-        chart_canvas_obj = generate_candlestick_chart(stock_name, chart_frame)
+        show_kmeans_sr_var = ttk.BooleanVar(value=True) # Default to show lines
+
+        chart_frame = ttk.Frame(dialog_main_frame) # Frame to hold the chart
+        chart_frame.pack(pady=5, fill=BOTH, expand=True, side=TOP)
         
-        if not chart_canvas_obj:
-            error_label = ttk.Label(chart_frame, text=f"Could not load chart for {stock_name}.", foreground="red")
-            error_label.pack(pady=10, fill=BOTH, expand=True)
+        # Function to redraw chart (needed for checkbox toggle)
+        def redraw_chart():
+            nonlocal current_chart_canvas_obj
+            # Clear previous chart from chart_frame
+            for widget in chart_frame.winfo_children():
+                widget.destroy()
+            if current_chart_canvas_obj and current_chart_canvas_obj.get_tk_widget().winfo_exists():
+                 current_chart_canvas_obj.get_tk_widget().destroy()
+                 plt.close(current_chart_canvas_obj.figure)
+
+            current_chart_canvas_obj = generate_candlestick_chart(stock_name, chart_frame, show_kmeans_sr_var.get())
+            if not current_chart_canvas_obj:
+                error_label = ttk.Label(chart_frame, text=f"Could not load chart for {stock_name}.", foreground="red")
+                error_label.pack(pady=10, fill=BOTH, expand=True)
+
+        kmeans_checkbutton = ttk.Checkbutton(dialog_main_frame, text="Show K-Means S/R Lines", variable=show_kmeans_sr_var, command=redraw_chart)
+        kmeans_checkbutton.pack(side=TOP, pady=(0,5))
+        
+        # Initial chart draw
+        redraw_chart()
 
         buttons_frame = ttk.Frame(dialog_main_frame)
-        buttons_frame.pack(fill=X, pady=(10,0))
+        buttons_frame.pack(fill=X, pady=(10,0), side=BOTTOM)
 
         def handle_decision(confirmed_this_stock):
             if confirmed_this_stock:
-                confirmed_stocks_accumulator.append(stock_to_confirm)
-                print(f"DEBUG: {stock_name} confirmed YES.")
+                confirmed_stocks_accumulator.append(stock_to_confirm_data) # Append the original data
+                print(f"DEBUG: {stock_name} confirmed YES (K-Means S/R).")
             else:
-                print(f"DEBUG: {stock_name} confirmed NO.")
+                print(f"DEBUG: {stock_name} confirmed NO (K-Means S/R).")
             
-            confirmation_dialog.destroy()
-            _show_next_stock_confirmation(current_stock_list_to_review)
+            # Destroy current dialog and move to next or finish
+            confirmation_dialog.destroy() # Destroy this specific dialog instance
+            _show_next_stock_confirmation(current_stock_list_to_review) # Process next stock
 
         no_button = ttk.Button(buttons_frame, text="No (Exclude)", bootstyle="danger", command=lambda: handle_decision(False))
         no_button.pack(side=RIGHT, padx=10)
@@ -374,13 +285,31 @@ def open_trend_line_confirmation_window(parent_window_for_dialogs, all_detected_
         yes_button = ttk.Button(buttons_frame, text="Yes (Include)", bootstyle="success", command=lambda: handle_decision(True))
         yes_button.pack(side=RIGHT, padx=10)
         
-        # Center the dialog
         center_toplevel_window(confirmation_dialog)
         confirmation_dialog.focus_set()
+        
+        # Ensure the dialog closes properly if the window 'X' is clicked
+        def on_dialog_close():
+            print(f"DEBUG: Confirmation dialog for {stock_name} closed via window manager.")
+            # Treat as 'No' or some other default action if needed, or just close.
+            # For now, let it close and the main flow might be interrupted.
+            # To ensure flow, one might want to trigger handle_decision(False) or similar.
+            # However, grab_set should prevent interaction with parent until this is closed.
+            if current_chart_canvas_obj and current_chart_canvas_obj.get_tk_widget().winfo_exists():
+                 current_chart_canvas_obj.get_tk_widget().destroy()
+                 plt.close(current_chart_canvas_obj.figure)
+            confirmation_dialog.destroy()
+            # Potentially call _show_next_stock_confirmation([]) to terminate early,
+            # or just let it hang if parent window is also closed.
+            # For robustness, this should ideally not skip the rest of the stocks.
+            # A simple destroy might be okay if user intends to abort.
+
+        confirmation_dialog.protocol("WM_DELETE_WINDOW", on_dialog_close)
+
 
     if not all_detected_stocks:
         original_shared_detected_stocks_list_ref.clear()
-        original_completion_callback([], "No stocks were initially detected for trend line confirmation.", "No action taken.")
+        original_completion_callback([], "No stocks were initially detected for K-Means S/R line confirmation.", "No action taken.")
         original_set_continue_button_state_callback(False)
         return
         
