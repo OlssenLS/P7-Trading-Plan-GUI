@@ -43,70 +43,134 @@ async def calculate_stochastic_golden_cross(data, k_period=14, d_period=3):
 async def check_volume_criteria(data):
     """Check if volume is above 5-day high or 20-day high"""
     if len(data['volume']) < 20: # Ensure enough data for 20-day high
+        # If less than 20 days, check for 5-day high if possible
+        if len(data['volume']) >= 5:
+            current_volume = data['volume'].iloc[-1]
+            high_5_day = data['volume'].rolling(window=5).max().iloc[-2] 
+            return current_volume > high_5_day
         return False 
     
     current_volume = data['volume'].iloc[-1]
-    high_5_day = data['volume'].rolling(window=5).max().iloc[-2] # Use -2 to exclude current day's volume if it's part of the series being formed
+    high_5_day = data['volume'].rolling(window=5).max().iloc[-2]
     high_20_day = data['volume'].rolling(window=20).max().iloc[-2]
     
     return current_volume > high_5_day or current_volume > high_20_day
 
 # --- Apply Technical Filters ---
-async def apply_technical_filters(df, filters):
+async def apply_technical_filters(df, technical_options, ema_periods=None):
     """Apply selected technical filters to the data"""
-    if df.empty:
-        return False
+    passed_all = True
+    passed_reasons = []
+    failed_details = []
 
-    meets_criteria = True
+    if df.empty:
+        return {"passed_all_selected_technical_filters": False, "passed_filters_reasons": [], "failed_filters_details": ["DataFrame is empty"]}
+
     latest_row = df.iloc[-1]
     
-    if filters.get('ema_20'):
+    # Standard EMA filters (could be kept for non-advanced or specific selection)
+    if technical_options.get('ema_20'):
         ema20 = await calculate_ema(df['close'], 20)
-        meets_criteria &= latest_row['close'] > ema20.iloc[-1]
+        if not (latest_row['close'] > ema20.iloc[-1]):
+            passed_all = False
+            failed_details.append("Price not > EMA20")
+        else:
+            passed_reasons.append("Price > EMA20")
 
-    if filters.get('ema_60'):
+    if technical_options.get('ema_60'):
         ema60 = await calculate_ema(df['close'], 60)
-        meets_criteria &= latest_row['close'] > ema60.iloc[-1]
+        if not (latest_row['close'] > ema60.iloc[-1]):
+            passed_all = False
+            failed_details.append("Price not > EMA60")
+        else:
+            passed_reasons.append("Price > EMA60")
 
-    if filters.get('macd'):
+    # Custom EMA filters from Advanced Mode
+    if ema_periods:
+        if technical_options.get('use_custom_ema_1') and 'ema_short_period' in ema_periods:
+            ema_custom_1_val = await calculate_ema(df['close'], ema_periods['ema_short_period'])
+            if not (latest_row['close'] > ema_custom_1_val.iloc[-1]):
+                passed_all = False
+                failed_details.append(f"Price not > Custom EMA{ema_periods['ema_short_period']}")
+            else:
+                passed_reasons.append(f"Price > Custom EMA{ema_periods['ema_short_period']}")
+        
+        if technical_options.get('use_custom_ema_2') and 'ema_long_period' in ema_periods:
+            ema_custom_2_val = await calculate_ema(df['close'], ema_periods['ema_long_period'])
+            if not (latest_row['close'] > ema_custom_2_val.iloc[-1]): # Assuming price should be above the longer EMA too
+                passed_all = False
+                failed_details.append(f"Price not > Custom EMA{ema_periods['ema_long_period']}")
+            else:
+                passed_reasons.append(f"Price > Custom EMA{ema_periods['ema_long_period']}")
+
+    if technical_options.get('macd'):
         macd, signal = await calculate_macd(df['close'])
-        meets_criteria &= macd.iloc[-1] > signal.iloc[-1]
+        if not (macd.iloc[-1] > signal.iloc[-1]):
+            passed_all = False
+            failed_details.append("MACD not > Signal")
+        else:
+            passed_reasons.append("MACD > Signal")
 
-    if filters.get('stochastic'):
+    if technical_options.get('stochastic'):
         golden_cross = await calculate_stochastic_golden_cross(df)
-        meets_criteria &= golden_cross
+        if not golden_cross:
+            passed_all = False
+            failed_details.append("No Stochastic Golden Cross")
+        else:
+            passed_reasons.append("Stochastic Golden Cross")
 
-    if filters.get('volume'):
-        meets_criteria &= await check_volume_criteria(df)
+    if technical_options.get('volume'):
+        volume_ok = await check_volume_criteria(df)
+        if not volume_ok:
+            passed_all = False
+            failed_details.append("Volume criteria not met")
+        else:
+            passed_reasons.append("Volume criteria met")
 
-    return meets_criteria
+    return {"passed_all_selected_technical_filters": passed_all, "passed_filters_reasons": passed_reasons, "failed_filters_details": failed_details}
 
 # --- Generate Technical Analysis Summary ---
-async def get_technical_analysis_summary(df, filters):
+async def get_technical_analysis_summary(df, technical_options, ema_periods=None):
     """Generate a summary of technical analysis based on selected filters only"""
     summary = []
+    if df.empty:
+        return "No data for TA summary"
+        
     latest = df.iloc[-1]
     
-    if filters.get('ema_20'):
+    # Standard EMA filters
+    if technical_options.get('ema_20'):
         ema20 = await calculate_ema(df['close'], 20)
         if latest['close'] > ema20.iloc[-1]:
-            summary.append("Price above EMA20")
+            summary.append("Price > EMA20")
     
-    if filters.get('ema_60'):
+    if technical_options.get('ema_60'):
         ema60 = await calculate_ema(df['close'], 60)
         if latest['close'] > ema60.iloc[-1]:
-            summary.append("Price above EMA60")
+            summary.append("Price > EMA60")
+
+    # Custom EMA filters from Advanced Mode
+    if ema_periods:
+        if technical_options.get('use_custom_ema_1') and 'ema_short_period' in ema_periods:
+            ema_custom_1_val = await calculate_ema(df['close'], ema_periods['ema_short_period'])
+            if latest['close'] > ema_custom_1_val.iloc[-1]:
+                summary.append(f"Price > Custom EMA{ema_periods['ema_short_period']}")
+        
+        if technical_options.get('use_custom_ema_2') and 'ema_long_period' in ema_periods:
+            ema_custom_2_val = await calculate_ema(df['close'], ema_periods['ema_long_period'])
+            if latest['close'] > ema_custom_2_val.iloc[-1]:
+                summary.append(f"Price > Custom EMA{ema_periods['ema_long_period']}")
     
-    if filters.get('macd'):
+    if technical_options.get('macd'):
         macd, signal = await calculate_macd(df['close'])
         if macd.iloc[-1] > signal.iloc[-1]:
-            summary.append("MACD above Signal")
+            summary.append("MACD > Signal")
     
-    if filters.get('stochastic'):
+    if technical_options.get('stochastic'):
         if await calculate_stochastic_golden_cross(df):
             summary.append("Stochastic Golden Cross")
     
-    if filters.get('volume'):
+    if technical_options.get('volume'):
         current_volume = df['volume'].iloc[-1]
         # The following pandas operations are synchronous.
         # The async nature is for the overall structure and potential I/O bound operations not shown here.

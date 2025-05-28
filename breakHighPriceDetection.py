@@ -88,7 +88,7 @@ def save_detection_history(history):
         print(f"Error saving detection history: {e}")
 
 # --- Core Stock Data Fetching and Processing ---
-def fetch_and_process_stock_data(stock, options, base_url, current_date_history, latest_date_for_run_dt):
+def fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria, base_url, current_date_history, latest_date_for_run_dt, ema_periods=None):
     """Fetches and processes data for a single stock. Designed to be run in a thread."""
     try:
         endpoint_url = f"{base_url}/api/stocks/{stock}?start_date=2023-01-01"
@@ -130,7 +130,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                 stock_hist_today = current_date_history.get(stock, {})
 
                 # Break 1d High (yesterday's high)
-                if options["1_day"] and len(df) >= 2:
+                if break_high_criteria.get("1_day") and len(df) >= 2:
                     is_new_break_1d = False
                     yesterday_high = df.iloc[-2]["high"]
                     if latest_high_of_day > yesterday_high:
@@ -150,7 +150,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                             break_reasons.append(f"1 Day High (Day {days_since} of {KEEP_1D_BREAK_DAYS})")
 
                 # Break 5-days high
-                if options["5_days"] and len(df) >= 6:
+                if break_high_criteria.get("5_days") and len(df) >= 6:
                     is_new_break_5d = False
                     current_period_high_5d = df["high"].iloc[-6:-1].max()
                     if latest_close > current_period_high_5d:
@@ -174,7 +174,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                         break_reasons.append(reason)
 
                 # Break 1-month high
-                if options["1_month"] and len(df) >= 22:
+                if break_high_criteria.get("1_month") and len(df) >= 22:
                     is_new_break_1m = False
                     current_period_high_1m = df["high"].iloc[-22:-1].max()
                     if latest_close > current_period_high_1m:
@@ -198,7 +198,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                         break_reasons.append(reason)
                 
                 # Break 2-months high
-                if options["2_months"] and len(df) >= 44:
+                if break_high_criteria.get("2_months") and len(df) >= 44:
                     is_new_break_2m = False
                     current_period_high_2m = df["high"].iloc[-44:-1].max()
                     if latest_close > current_period_high_2m:
@@ -222,7 +222,7 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                         break_reasons.append(reason)
 
                 # Break 3-months high
-                if options["3_months"] and len(df) >= 66:
+                if break_high_criteria.get("3_months") and len(df) >= 66:
                     is_new_break_3m = False
                     current_period_high_3m = df["high"].iloc[-66:-1].max()
                     if latest_close > current_period_high_3m:
@@ -246,6 +246,18 @@ def fetch_and_process_stock_data(stock, options, base_url, current_date_history,
                         break_reasons.append(reason)
                 
                 if broke_high:
+                    # Apply technical filters if any break high condition is met AND technical_criteria are selected
+                    if any(technical_criteria.values()):
+                        technical_filter_results = apply_technical_filters(df, technical_criteria, ema_periods) 
+                        if technical_filter_results["passed_all_selected_technical_filters"]:
+                            break_reasons.extend(technical_filter_results["passed_filters_reasons"])
+                            # Optionally, add TA summary if needed from get_technical_analysis_summary
+                            # tech_summary = get_technical_analysis_summary(df, technical_criteria, ema_periods=ema_periods)
+                            # break_reasons.append(f"TA: {tech_summary}")
+                        else:
+                            # Failed technical filters after breaking high
+                            return stock, None, f"{stock} broke high but failed technical filters: {', '.join(technical_filter_results['failed_filters_details'])}"
+                    # If no technical criteria selected, it passes this stage by default if broke_high is true
                     return stock, (break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_for_stock_output, break_types_for_history, potential_tp_levels_from_history), None
                 else:
                     return stock, ([], latest_close, latest_low_of_day, latest_high_of_day, {}, break_types_for_history, potential_tp_levels_from_history), f"No breaks for {stock}."
@@ -274,6 +286,14 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
     
     break_high_options = filters.get('break_high', {})
     technical_options = filters.get('technical', {})
+    # Extract EMA periods if available from advanced mode (passed in main 'filters' dict)
+    custom_ema_periods = None
+    if filters.get("ema1_period") and filters.get("ema2_period"):
+        custom_ema_periods = {
+            "ema_short_period": filters["ema1_period"],
+            "ema_long_period": filters["ema2_period"]
+        }
+        progress_callback(f"Using custom EMA periods: Short={custom_ema_periods['ema_short_period']}, Long={custom_ema_periods['ema_long_period']}\n")
     
     only_1d_break = (break_high_options.get("1_day", False) and 
                     not any(break_high_options.get(option, False) 
@@ -319,16 +339,13 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         future_to_stock = {executor.submit(fetch_and_process_stock_data, 
                                            stock, 
-                                           {
-                                               "1_day": break_high_options.get("1_day", False),
-                                               "5_days": break_high_options.get("5_days", False),
-                                               "1_month": break_high_options.get("1_month", False),
-                                               "2_months": break_high_options.get("2_months", False),
-                                               "3_months": break_high_options.get("3_months", False)
-                                           }, 
+                                           break_high_options, # Pass only break_high_options here
+                                           technical_options,  # Pass technical_options separately
                                            base_url, 
                                            detection_history.get(current_date_str, {}),
-                                           latest_date_for_run_dt):
+                                           latest_date_for_run_dt,
+                                           custom_ema_periods # Pass custom_ema_periods
+                                           ):
                             stock for stock in stocks}
 
         for future in concurrent.futures.as_completed(future_to_stock):
@@ -346,30 +363,7 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
                 if result_data:
                     break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, break_types_hist, potential_tp_levels = result_data
                     
-                    if break_reasons:
-                        # Apply technical filters
-                        if any(technical_options.values()):
-                            try:
-                                response = requests.get(f"{base_url}/api/stocks/{stock_symbol_result}?start_date=2023-01-01")
-                                if response.status_code == 200:
-                                    data = response.json()
-                                    if data and "historical_data" in data:
-                                        df = pd.DataFrame(data["historical_data"])
-                                        df["date"] = pd.to_datetime(df["date"])
-                                        df = df.sort_values("date")
-                                        
-                                        # Run async functions using asyncio.run() in the thread
-                                        meets_technical_criteria = asyncio.run(apply_technical_filters(df, technical_options))
-                                        if not meets_technical_criteria:
-                                            progress_callback(f"Skipped {stock_symbol_result}: Did not meet technical criteria.\n")
-                                            continue
-                                        
-                                        tech_summary = asyncio.run(get_technical_analysis_summary(df, technical_options))
-                                        break_reasons.append(f"Technical Analysis: {tech_summary}")
-                            except Exception as e:
-                                progress_callback(f"Error applying technical filters for {stock_symbol_result}: {str(e)}\n")
-                                continue
-
+                    if break_reasons: # This implies it passed break_high AND technical_filters (if any were selected)
                         detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, potential_tp_levels))
                         progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
 
@@ -382,7 +376,8 @@ def detect_break_high_price(filters, output_list_for_plan, progress_callback, po
                             if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
                                 detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
                             detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
-                
+                    # else: stock did not meet all criteria (either no break_high or failed technicals)
+                    # progress_callback(f"No qualifying signal for {stock_symbol_result}.\n") # Optional: for more verbose logging
             except Exception as exc:
                 processed_count += 1
                 progress_callback(f"({processed_count}/{total_stocks}) Error processing {stock_symbol}: {exc}\n")

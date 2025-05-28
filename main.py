@@ -40,6 +40,8 @@ root.geometry("800x600")
 root.resizable(True, True)
 center_toplevel_window(root)
 
+advanced_mode_var = ttk.BooleanVar(value=False) # Variable to store Advanced Mode state
+
 center_frame = ttk.Frame(root)
 center_frame.pack(expand=True, fill=BOTH)
 center_frame.place(relx=0.5, rely=0.5, anchor=CENTER)
@@ -269,6 +271,83 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     if plan_type_disabled:
         plan_type_combo.config(state=DISABLED)
 
+    # --- Advanced Mode Fields ---
+    advanced_frame = ttk.Frame(main_frame)
+    # advanced_frame.pack(fill=X, pady=(10,5)) # Packed later if advanced_mode_var is True
+
+    # Variables for advanced settings
+    entry_range_type_var = ttk.StringVar(value="Low to High") # Default
+    sl_definition_type_var = ttk.StringVar(value="Percentage") # Default: Percentage or Ticks
+    sl_value_var = ttk.StringVar(value="2") # Default SL value (e.g., 2% or 2 ticks)
+    
+    # TP Variables
+    tp1_type_var = ttk.StringVar(value="Percentage")
+    tp1_value_var = ttk.StringVar(value="3") # e.g. 3% or 3 ticks from entry
+    tp2_type_var = ttk.StringVar(value="Percentage")
+    tp2_value_var = ttk.StringVar(value="5")
+    tp3_type_var = ttk.StringVar(value="Percentage")
+    tp3_value_var = ttk.StringVar(value="7")
+
+    if advanced_mode_var.get():
+        advanced_frame.pack(fill=X, pady=(10,5)) # Pack the frame only in advanced mode
+        ttk.Label(advanced_frame, text="Advanced Plan Settings:", font=("Helvetica", 10, "bold")).pack(anchor=W, pady=(0,5))
+
+        # Entry Price Range Settings
+        entry_range_frame = ttk.Frame(advanced_frame)
+        entry_range_frame.pack(fill=X, pady=(5,0))
+        ttk.Label(entry_range_frame, text="Entry Range Type:").pack(side=LEFT, padx=(0,5))
+        entry_range_combo = ttk.Combobox(entry_range_frame, textvariable=entry_range_type_var, values=["Low to High", "Low to Close", "Close to High"], state="readonly", width=15)
+        entry_range_combo.pack(side=LEFT)
+
+        # Stop Loss Settings
+        sl_settings_frame = ttk.Frame(advanced_frame)
+        sl_settings_frame.pack(fill=X, pady=(5,0))
+        ttk.Label(sl_settings_frame, text="Stop Loss Type:").pack(side=LEFT, padx=(0,5))
+        sl_def_combo = ttk.Combobox(sl_settings_frame, textvariable=sl_definition_type_var, values=["Percentage", "Ticks"], state="readonly", width=12)
+        sl_def_combo.pack(side=LEFT, padx=(0,5))
+        ttk.Label(sl_settings_frame, text="SL Value:").pack(side=LEFT, padx=(0,5))
+        sl_value_entry = ttk.Entry(sl_settings_frame, textvariable=sl_value_var, width=5)
+        sl_value_entry.pack(side=LEFT)
+        sl_value_label_note = ttk.Label(sl_settings_frame, text="(% or ticks based on type)")
+        sl_value_label_note.pack(side=LEFT, padx=(5,0))
+
+        # Take Profit Settings
+        tp_main_label = ttk.Label(advanced_frame, text="Take Profit Levels:", font=("Helvetica", 9, "italic"))
+        tp_main_label.pack(anchor=W, pady=(10,2))
+
+        # TP1 Settings
+        tp1_frame = ttk.Frame(advanced_frame)
+        tp1_frame.pack(fill=X, pady=(2,0))
+        ttk.Label(tp1_frame, text="TP1 Type:").pack(side=LEFT, padx=(0,5))
+        tp1_type_combo = ttk.Combobox(tp1_frame, textvariable=tp1_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+        tp1_type_combo.pack(side=LEFT, padx=(0,5))
+        ttk.Label(tp1_frame, text="TP1 Value:").pack(side=LEFT, padx=(0,5))
+        ttk.Entry(tp1_frame, textvariable=tp1_value_var, width=5).pack(side=LEFT)
+        ttk.Label(tp1_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+
+        # TP2 Settings
+        tp2_frame = ttk.Frame(advanced_frame)
+        tp2_frame.pack(fill=X, pady=(2,0))
+        ttk.Label(tp2_frame, text="TP2 Type:").pack(side=LEFT, padx=(0,5))
+        tp2_type_combo = ttk.Combobox(tp2_frame, textvariable=tp2_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+        tp2_type_combo.pack(side=LEFT, padx=(0,5))
+        ttk.Label(tp2_frame, text="TP2 Value:").pack(side=LEFT, padx=(0,5))
+        ttk.Entry(tp2_frame, textvariable=tp2_value_var, width=5).pack(side=LEFT)
+        ttk.Label(tp2_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+
+        # TP3 Settings
+        tp3_frame = ttk.Frame(advanced_frame)
+        tp3_frame.pack(fill=X, pady=(2,0))
+        ttk.Label(tp3_frame, text="TP3 Type:").pack(side=LEFT, padx=(0,5))
+        tp3_type_combo = ttk.Combobox(tp3_frame, textvariable=tp3_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+        tp3_type_combo.pack(side=LEFT, padx=(0,5))
+        ttk.Label(tp3_frame, text="TP3 Value:").pack(side=LEFT, padx=(0,5))
+        ttk.Entry(tp3_frame, textvariable=tp3_value_var, width=5).pack(side=LEFT)
+        ttk.Label(tp3_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+    else:
+        # Hide the advanced frame if not in advanced mode
+        advanced_frame.pack_forget()
+
     button_frame = ttk.Frame(main_frame)
     button_frame.pack(fill=X, pady=(10, 0))
 
@@ -298,7 +377,36 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
             return
 
         selected_plan_type = plan_type_var.get()
-        generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan, plan_type=selected_plan_type)
+        
+        adv_settings = None # Renamed from advanced_settings to avoid conflict if that name is used elsewhere
+        if advanced_mode_var.get():
+            try:
+                sl_val = float(sl_value_var.get())
+                if sl_val <= 0:
+                    simpledialog.messagebox.showerror("Invalid SL Value", "Stop Loss value must be positive.", parent=plan_window)
+                    return
+
+                adv_settings = {
+                    "entry_range_type": entry_range_type_var.get(),
+                    "sl_definition_type": sl_definition_type_var.get(),
+                    "sl_value": sl_val,
+                    "tp1_type": tp1_type_var.get(),
+                    "tp1_value": float(tp1_value_var.get()),
+                    "tp2_type": tp2_type_var.get(),
+                    "tp2_value": float(tp2_value_var.get()),
+                    "tp3_type": tp3_type_var.get(),
+                    "tp3_value": float(tp3_value_var.get()),
+                }
+                # Basic validation for TP values
+                if adv_settings["tp1_value"] <= 0 or adv_settings["tp2_value"] <= 0 or adv_settings["tp3_value"] <= 0:
+                    simpledialog.messagebox.showerror("Invalid TP Value", "Take Profit values must be positive.", parent=plan_window)
+                    return
+
+            except ValueError:
+                simpledialog.messagebox.showerror("Invalid Input", "Please ensure all advanced numerical settings (SL, R/R) are valid numbers.", parent=plan_window)
+                return
+
+        generated_plans = generate_plans_for_stocks(selected_stock_details_for_plan, plan_type=selected_plan_type, advanced_settings=adv_settings)
         
         show_generated_plans_window(plan_window.master, generated_plans, plan_window)
 
@@ -315,7 +423,33 @@ def open_generator_window():
     filters_panel_frame = ttk.Frame(main_gen_frame)
     filters_panel_frame.pack(fill=X, pady=(0, 10))
     ttk.Label(filters_panel_frame, text="Select Filter Options:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,5))
-    filter_manager = FilterManager(filters_panel_frame)
+    filter_manager = FilterManager(filters_panel_frame, advanced_mode_var)
+
+    # Advanced Mode EMA Inputs
+    if advanced_mode_var.get():
+        ema_settings_frame = ttk.LabelFrame(filters_panel_frame, text="Custom EMA Settings", padding=10)
+        ema_settings_frame.pack(fill=X, pady=(5,0), padx=5)
+
+        ema1_period_var = ttk.StringVar(value="9") # Default EMA1
+        ema2_period_var = ttk.StringVar(value="21") # Default EMA2
+
+        # EMA 1 Input
+        ema1_input_frame = ttk.Frame(ema_settings_frame)
+        ema1_input_frame.pack(fill=X, pady=(0,5))
+        ttk.Label(ema1_input_frame, text="EMA 1 Period:").pack(side=LEFT, padx=(0,5))
+        ttk.Entry(ema1_input_frame, textvariable=ema1_period_var, width=5).pack(side=LEFT, padx=(0,10))
+
+        # EMA 2 Input
+        ema2_input_frame = ttk.Frame(ema_settings_frame)
+        ema2_input_frame.pack(fill=X)
+        ttk.Label(ema2_input_frame, text="EMA 2 Period:").pack(side=LEFT, padx=(0,5))
+        ttk.Entry(ema2_input_frame, textvariable=ema2_period_var, width=5).pack(side=LEFT)
+    else:
+        # Ensure these vars exist even if not in advanced mode, to prevent errors in on_run_detection if logic is not careful
+        # However, on_run_detection already checks advanced_mode_var.get() before accessing them.
+        # To be absolutely safe or if logic changes, define them:
+        ema1_period_var = ttk.StringVar(value="9") 
+        ema2_period_var = ttk.StringVar(value="21")
 
     shared_detected_stocks_list = []
     plan_type_config = {"type": "Swing Trader", "disabled": False}
@@ -392,6 +526,22 @@ def open_generator_window():
             selected_filters = filter_manager.get_selected_filters()
             trend_line_confirmation_selected = selected_filters.get("trend_line_confirmation", False)
             
+            if advanced_mode_var.get():
+                try:
+                    # These vars are now defined inside the if advanced_mode_var.get() block for UI,
+                    # so they should be retrieved there. However, the on_run_detection itself is fine.
+                    selected_filters["ema1_period"] = int(ema1_period_var.get()) # ema1_period_var will be from the scope where it's created
+                    selected_filters["ema2_period"] = int(ema2_period_var.get()) # ema2_period_var will be from the scope where it's created
+                    if selected_filters["ema1_period"] <= 0 or selected_filters["ema2_period"] <=0:
+                        simpledialog.messagebox.showerror("Invalid EMA", "EMA periods must be positive integers.", parent=generator_window)
+                        return
+                    if selected_filters["ema1_period"] == selected_filters["ema2_period"]:
+                        simpledialog.messagebox.showwarning("EMA Info", "EMA 1 and EMA 2 periods are the same.", parent=generator_window)
+
+                except ValueError:
+                    simpledialog.messagebox.showerror("Invalid EMA", "EMA periods must be valid integers.", parent=generator_window)
+                    return
+            
             if result_text.winfo_exists():
                 result_text.delete(1.0, END)
             set_continue_button_state_impl(False)
@@ -447,6 +597,9 @@ def show_main_page():
 
     create_button = ttk.Button(sidebar_frame, text="Create", bootstyle="primary", command=open_generator_window)
     create_button.pack(pady=5, fill=X)
+
+    advanced_mode_check = ttk.Checkbutton(sidebar_frame, text="Advanced Create", variable=advanced_mode_var, bootstyle="info-toolbutton")
+    advanced_mode_check.pack(pady=5, fill=X)
 
     manage_plans_button = ttk.Button(sidebar_frame, text="Manage Plans", bootstyle="info", command=lambda: open_manage_plans_window(root))
     manage_plans_button.pack(pady=5, fill=X)

@@ -2,8 +2,9 @@ import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 
 class FilterManager:
-    def __init__(self, parent_frame):
+    def __init__(self, parent_frame, advanced_mode_variable):
         self.parent_frame = parent_frame
+        self.advanced_mode_var = advanced_mode_variable
         self.break_high_vars = {}
         self.technical_vars = {}
         self.technical_frames = []
@@ -35,13 +36,24 @@ class FilterManager:
         self.tech_indicators_frame.pack(fill=X, padx=10, pady=5)
 
         # Technical indicator options
-        tech_options = {
-            "ema_20": "Price Above EMA 20",
-            "ema_60": "Price Above EMA 60",
+        tech_options = {}
+        if self.advanced_mode_var.get():
+            tech_options.update({
+                "use_custom_ema_1": "Use Custom EMA 1 (Short Period)",
+                "use_custom_ema_2": "Use Custom EMA 2 (Long Period)",
+            })
+        else:
+            tech_options.update({
+                "ema_20": "Price Above EMA 20",
+                "ema_60": "Price Above EMA 60",
+            })
+        
+        # Common technical indicators
+        tech_options.update({
             "macd": "MACD Bullish (GC)",
             "stochastic": "Stochastic Bullish (GC)",
             "volume": "Volume Above 5 and/or 20 Days High"
-        }
+        })
 
         for key, text in tech_options.items():
             var = ttk.BooleanVar(value=False)

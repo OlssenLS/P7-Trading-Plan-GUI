@@ -37,3 +37,24 @@ def add_ticks_to_price(base_price, num_ticks):
         tick_size = get_fraction_for_price(current_price)
         current_price += tick_size
     return int(current_price)
+
+def subtract_ticks_from_price(base_price, num_ticks):
+    """
+    Subtracts a specified number of ticks from a base price, adhering to IDX BEI fraction rules.
+    Assumes base_price is already an adjusted price.
+    Returns: The new price after subtracting the ticks, ensuring it doesn't go below zero.
+    """
+    current_price = float(base_price)
+    for _ in range(num_ticks):
+        # Determine tick size based on the price *before* subtraction for this tick
+        # or based on the price it would be if it were one tick lower, to handle fraction boundaries correctly.
+        # For simplicity and general case, using current_price might be acceptable, 
+        # but more precise would be to check fraction for (current_price - epsilon)
+        tick_size = get_fraction_for_price(current_price) 
+        current_price -= tick_size
+        if current_price < 0: # Ensure price doesn't go negative
+            current_price = 0
+            break 
+    # Final adjustment after all ticks are subtracted to ensure it lands on a valid fraction step
+    # This is important if subtractions crossed fraction boundaries.
+    return adjust_price_by_fraction(current_price) if current_price > 0 else 0
