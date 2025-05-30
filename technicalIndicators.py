@@ -57,7 +57,7 @@ async def check_volume_criteria(data):
     return current_volume > high_5_day or current_volume > high_20_day
 
 # --- Apply Technical Filters ---
-async def apply_technical_filters(df, technical_options, ema_periods=None):
+async def apply_technical_filters(df, technical_options):
     """Apply selected technical filters to the data"""
     passed_all = True
     passed_reasons = []
@@ -68,40 +68,64 @@ async def apply_technical_filters(df, technical_options, ema_periods=None):
 
     latest_row = df.iloc[-1]
     
-    # Standard EMA filters (could be kept for non-advanced or specific selection)
-    if technical_options.get('ema_20'):
-        ema20 = await calculate_ema(df['close'], 20)
-        if not (latest_row['close'] > ema20.iloc[-1]):
-            passed_all = False
-            failed_details.append("Price not > EMA20")
-        else:
-            passed_reasons.append("Price > EMA20")
+    # Standard EMA filters (if not in advanced custom mode)
+    if not technical_options.get("use_custom_ema"):
+        if technical_options.get('ema_20'):
+            ema20 = await calculate_ema(df['close'], 20)
+            if not (latest_row['close'] > ema20.iloc[-1]):
+                passed_all = False
+                failed_details.append("Price not > EMA20")
+            else:
+                passed_reasons.append("Price > EMA20")
 
-    if technical_options.get('ema_60'):
-        ema60 = await calculate_ema(df['close'], 60)
-        if not (latest_row['close'] > ema60.iloc[-1]):
-            passed_all = False
-            failed_details.append("Price not > EMA60")
-        else:
-            passed_reasons.append("Price > EMA60")
-
+        if technical_options.get('ema_60'):
+            ema60 = await calculate_ema(df['close'], 60)
+            if not (latest_row['close'] > ema60.iloc[-1]):
+                passed_all = False
+                failed_details.append("Price not > EMA60")
+            else:
+                passed_reasons.append("Price > EMA60")
+    
     # Custom EMA filters from Advanced Mode
-    if ema_periods:
-        if technical_options.get('use_custom_ema_1') and 'ema_short_period' in ema_periods:
-            ema_custom_1_val = await calculate_ema(df['close'], ema_periods['ema_short_period'])
-            if not (latest_row['close'] > ema_custom_1_val.iloc[-1]):
-                passed_all = False
-                failed_details.append(f"Price not > Custom EMA{ema_periods['ema_short_period']}")
+    if technical_options.get("use_custom_ema"):
+        try:
+            ema1_period_str = technical_options.get("ema1_period")
+            ema2_period_str = technical_options.get("ema2_period")
+
+            if ema1_period_str and ema2_period_str: # Ensure both are provided
+                ema1_period = int(ema1_period_str)
+                ema2_period = int(ema2_period_str)
+
+                if ema1_period > 0:
+                    ema_custom_1_val = await calculate_ema(df['close'], ema1_period)
+                    if not (latest_row['close'] > ema_custom_1_val.iloc[-1]):
+                        passed_all = False
+                        failed_details.append(f"Price not > Custom EMA{ema1_period}")
+                    else:
+                        passed_reasons.append(f"Price > Custom EMA{ema1_period}")
+                
+                if ema2_period > 0:
+                    # Assuming for custom EMA2, we also check if price is above it.
+                    # The logic might differ (e.g., price between EMA1 and EMA2, or EMA1 > EMA2)
+                    # For now, keeping it simple: Price > EMA for both if specified.
+                    ema_custom_2_val = await calculate_ema(df['close'], ema2_period)
+                    if not (latest_row['close'] > ema_custom_2_val.iloc[-1]): 
+                        passed_all = False
+                        failed_details.append(f"Price not > Custom EMA{ema2_period}")
+                    else:
+                        passed_reasons.append(f"Price > Custom EMA{ema2_period}")
             else:
-                passed_reasons.append(f"Price > Custom EMA{ema_periods['ema_short_period']}")
-        
-        if technical_options.get('use_custom_ema_2') and 'ema_long_period' in ema_periods:
-            ema_custom_2_val = await calculate_ema(df['close'], ema_periods['ema_long_period'])
-            if not (latest_row['close'] > ema_custom_2_val.iloc[-1]): # Assuming price should be above the longer EMA too
-                passed_all = False
-                failed_details.append(f"Price not > Custom EMA{ema_periods['ema_long_period']}")
-            else:
-                passed_reasons.append(f"Price > Custom EMA{ema_periods['ema_long_period']}")
+                # This case should ideally be caught earlier if 'use_custom_ema' is true
+                # but periods are missing. FilterManager should ensure they are set.
+                failed_details.append("Custom EMA periods not fully specified.")
+                # passed_all = False # Optionally mark as failed if crucial
+
+        except ValueError:
+            passed_all = False
+            failed_details.append("Invalid custom EMA period value(s).")
+        except Exception as e:
+            passed_all = False
+            failed_details.append(f"Error processing custom EMAs: {str(e)}")
 
     if technical_options.get('macd'):
         macd, signal = await calculate_macd(df['close'])
@@ -130,7 +154,7 @@ async def apply_technical_filters(df, technical_options, ema_periods=None):
     return {"passed_all_selected_technical_filters": passed_all, "passed_filters_reasons": passed_reasons, "failed_filters_details": failed_details}
 
 # --- Generate Technical Analysis Summary ---
-async def get_technical_analysis_summary(df, technical_options, ema_periods=None):
+async def get_technical_analysis_summary(df, technical_options):
     """Generate a summary of technical analysis based on selected filters only"""
     summary = []
     if df.empty:
@@ -139,27 +163,40 @@ async def get_technical_analysis_summary(df, technical_options, ema_periods=None
     latest = df.iloc[-1]
     
     # Standard EMA filters
-    if technical_options.get('ema_20'):
-        ema20 = await calculate_ema(df['close'], 20)
-        if latest['close'] > ema20.iloc[-1]:
-            summary.append("Price > EMA20")
-    
-    if technical_options.get('ema_60'):
-        ema60 = await calculate_ema(df['close'], 60)
-        if latest['close'] > ema60.iloc[-1]:
-            summary.append("Price > EMA60")
+    if not technical_options.get("use_custom_ema"):
+        if technical_options.get('ema_20'):
+            ema20 = await calculate_ema(df['close'], 20)
+            if latest['close'] > ema20.iloc[-1]:
+                summary.append("Price > EMA20")
+        
+        if technical_options.get('ema_60'):
+            ema60 = await calculate_ema(df['close'], 60)
+            if latest['close'] > ema60.iloc[-1]:
+                summary.append("Price > EMA60")
 
     # Custom EMA filters from Advanced Mode
-    if ema_periods:
-        if technical_options.get('use_custom_ema_1') and 'ema_short_period' in ema_periods:
-            ema_custom_1_val = await calculate_ema(df['close'], ema_periods['ema_short_period'])
-            if latest['close'] > ema_custom_1_val.iloc[-1]:
-                summary.append(f"Price > Custom EMA{ema_periods['ema_short_period']}")
-        
-        if technical_options.get('use_custom_ema_2') and 'ema_long_period' in ema_periods:
-            ema_custom_2_val = await calculate_ema(df['close'], ema_periods['ema_long_period'])
-            if latest['close'] > ema_custom_2_val.iloc[-1]:
-                summary.append(f"Price > Custom EMA{ema_periods['ema_long_period']}")
+    if technical_options.get("use_custom_ema"):
+        try:
+            ema1_period_str = technical_options.get("ema1_period")
+            ema2_period_str = technical_options.get("ema2_period")
+
+            if ema1_period_str and ema2_period_str:
+                ema1_period = int(ema1_period_str)
+                ema2_period = int(ema2_period_str)
+
+                if ema1_period > 0:
+                    ema_custom_1_val = await calculate_ema(df['close'], ema1_period)
+                    if latest['close'] > ema_custom_1_val.iloc[-1]:
+                        summary.append(f"Price > Custom EMA{ema1_period}")
+                
+                if ema2_period > 0:
+                    ema_custom_2_val = await calculate_ema(df['close'], ema2_period)
+                    if latest['close'] > ema_custom_2_val.iloc[-1]:
+                        summary.append(f"Price > Custom EMA{ema2_period}")
+        except ValueError:
+            summary.append("Invalid custom EMA period value(s) for summary.")
+        except Exception as e:
+            summary.append(f"Error in custom EMA summary: {str(e)}")
     
     if technical_options.get('macd'):
         macd, signal = await calculate_macd(df['close'])
@@ -172,21 +209,19 @@ async def get_technical_analysis_summary(df, technical_options, ema_periods=None
     
     if technical_options.get('volume'):
         current_volume = df['volume'].iloc[-1]
-        # The following pandas operations are synchronous.
-        # The async nature is for the overall structure and potential I/O bound operations not shown here.
-        if len(df['volume']) >= 5: # Check for 5-day high only if enough data
-            high_5_day = df['volume'].rolling(window=5).max().shift(1).iloc[-1] # shift(1) to get previous high
-            if current_volume > high_5_day:
-                summary.append("Volume above 5-day high")
+        # rolling(W).max().iloc[-2] gets the max of W-day window ending at the previous day.
+        # Ensure enough data for .iloc[-2] access from rolling max (needs W values for rolling, +1 for prev day).
         
-        if len(df['volume']) >= 20: # Check for 20-day high only if enough data
-             high_20_day = df['volume'].rolling(window=20).max().shift(1).iloc[-1] # shift(1) to get previous high
-             if current_volume > high_20_day and "Volume above 5-day high" not in summary: # Avoid duplicate message if also above 5-day
+        added_5_day_msg = False
+        if len(df['volume']) >= 5 + 1: 
+            high_5_day_prev = df['volume'].rolling(window=5).max().iloc[-2]
+            if pd.notna(high_5_day_prev) and current_volume > high_5_day_prev:
+                summary.append("Volume above 5-day high")
+                added_5_day_msg = True
+        
+        if not added_5_day_msg and len(df['volume']) >= 20 + 1: 
+            high_20_day_prev = df['volume'].rolling(window=20).max().iloc[-2]
+            if pd.notna(high_20_day_prev) and current_volume > high_20_day_prev:
                 summary.append("Volume above 20-day high")
-        elif "Volume above 5-day high" not in summary and not (len(df['volume']) >= 5 and current_volume > df['volume'].rolling(window=5).max().shift(1).iloc[-1]): # If not already added and not enough data for 20 day
-             # Check if any volume criteria could be met at all based on data length
-            if not (len(df['volume']) >= 5 and current_volume > df['volume'].rolling(window=5).max().shift(1).iloc[-1]) and \
-               not (len(df['volume']) >= 20 and current_volume > df['volume'].rolling(window=20).max().shift(1).iloc[-1]):
-                 pass # No message if no criteria can be met or already added.
     
     return ", ".join(summary) if summary else "No significant technical signals" 

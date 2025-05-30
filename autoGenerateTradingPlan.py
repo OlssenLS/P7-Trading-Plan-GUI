@@ -21,7 +21,7 @@ def generate_plans_for_stocks(selected_stocks_details, plan_type="Swing Trader",
         return []
 
     for stock_detail in selected_stocks_details:
-        stock_name, reasons, latest_close, latest_low_of_day, latest_high_of_day, period_high_prices_info, potential_tp_levels_from_history = stock_detail 
+        stock_name, latest_close, latest_low_of_day, latest_high_of_day, reasons, period_high_prices_info, potential_tp_levels_from_history, tech_summary, *_ = stock_detail 
         
         # Initialize defaults
         entry_price_actual = None

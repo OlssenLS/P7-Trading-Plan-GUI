@@ -268,8 +268,8 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     plan_type_combo = ttk.Combobox(plan_type_frame, textvariable=plan_type_var, values=["Swing Trader", "Day Trader"], state="readonly")
     plan_type_combo.pack(side=LEFT, fill=X, expand=True)
 
-    if plan_type_disabled:
-        plan_type_combo.config(state=DISABLED)
+    # if plan_type_disabled: # This logic might need to be re-evaluated or integrated with advanced mode
+    #     plan_type_combo.config(state=DISABLED)
 
     # --- Advanced Mode Fields ---
     advanced_frame = ttk.Frame(main_frame)
@@ -288,65 +288,76 @@ def open_trading_plan_window(parent_window, stocks_for_plan_generation_data, ini
     tp3_type_var = ttk.StringVar(value="Percentage")
     tp3_value_var = ttk.StringVar(value="7")
 
-    if advanced_mode_var.get():
-        advanced_frame.pack(fill=X, pady=(10,5)) # Pack the frame only in advanced mode
-        ttk.Label(advanced_frame, text="Advanced Plan Settings:", font=("Helvetica", 10, "bold")).pack(anchor=W, pady=(0,5))
+    def toggle_advanced_fields(*args):
+        if advanced_mode_var.get():
+            advanced_frame.pack(fill=X, pady=(10,5))
+            plan_type_frame.pack_forget() # Hide plan type selector in advanced mode
 
-        # Entry Price Range Settings
-        entry_range_frame = ttk.Frame(advanced_frame)
-        entry_range_frame.pack(fill=X, pady=(5,0))
-        ttk.Label(entry_range_frame, text="Entry Range Type:").pack(side=LEFT, padx=(0,5))
-        entry_range_combo = ttk.Combobox(entry_range_frame, textvariable=entry_range_type_var, values=["Low to High", "Low to Close", "Close to High"], state="readonly", width=15)
-        entry_range_combo.pack(side=LEFT)
+            ttk.Label(advanced_frame, text="Advanced Plan Settings:", font=("Helvetica", 10, "bold")).pack(anchor=W, pady=(0,5))
 
-        # Stop Loss Settings
-        sl_settings_frame = ttk.Frame(advanced_frame)
-        sl_settings_frame.pack(fill=X, pady=(5,0))
-        ttk.Label(sl_settings_frame, text="Stop Loss Type:").pack(side=LEFT, padx=(0,5))
-        sl_def_combo = ttk.Combobox(sl_settings_frame, textvariable=sl_definition_type_var, values=["Percentage", "Ticks"], state="readonly", width=12)
-        sl_def_combo.pack(side=LEFT, padx=(0,5))
-        ttk.Label(sl_settings_frame, text="SL Value:").pack(side=LEFT, padx=(0,5))
-        sl_value_entry = ttk.Entry(sl_settings_frame, textvariable=sl_value_var, width=5)
-        sl_value_entry.pack(side=LEFT)
-        sl_value_label_note = ttk.Label(sl_settings_frame, text="(% or ticks based on type)")
-        sl_value_label_note.pack(side=LEFT, padx=(5,0))
+            # Entry Price Range Settings
+            entry_range_frame = ttk.Frame(advanced_frame)
+            entry_range_frame.pack(fill=X, pady=(5,0))
+            ttk.Label(entry_range_frame, text="Entry Range Type:").pack(side=LEFT, padx=(0,5))
+            entry_range_combo = ttk.Combobox(entry_range_frame, textvariable=entry_range_type_var, values=["Low to High", "Low to Close", "Close to High"], state="readonly", width=15)
+            entry_range_combo.pack(side=LEFT)
 
-        # Take Profit Settings
-        tp_main_label = ttk.Label(advanced_frame, text="Take Profit Levels:", font=("Helvetica", 9, "italic"))
-        tp_main_label.pack(anchor=W, pady=(10,2))
+            # Stop Loss Settings
+            sl_settings_frame = ttk.Frame(advanced_frame)
+            sl_settings_frame.pack(fill=X, pady=(5,0))
+            ttk.Label(sl_settings_frame, text="Stop Loss Type:").pack(side=LEFT, padx=(0,5))
+            sl_def_combo = ttk.Combobox(sl_settings_frame, textvariable=sl_definition_type_var, values=["Percentage", "Ticks"], state="readonly", width=12)
+            sl_def_combo.pack(side=LEFT, padx=(0,5))
+            ttk.Label(sl_settings_frame, text="SL Value:").pack(side=LEFT, padx=(0,5))
+            sl_value_entry = ttk.Entry(sl_settings_frame, textvariable=sl_value_var, width=5)
+            sl_value_entry.pack(side=LEFT)
+            sl_value_label_note = ttk.Label(sl_settings_frame, text="(% or ticks based on type)")
+            sl_value_label_note.pack(side=LEFT, padx=(5,0))
 
-        # TP1 Settings
-        tp1_frame = ttk.Frame(advanced_frame)
-        tp1_frame.pack(fill=X, pady=(2,0))
-        ttk.Label(tp1_frame, text="TP1 Type:").pack(side=LEFT, padx=(0,5))
-        tp1_type_combo = ttk.Combobox(tp1_frame, textvariable=tp1_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
-        tp1_type_combo.pack(side=LEFT, padx=(0,5))
-        ttk.Label(tp1_frame, text="TP1 Value:").pack(side=LEFT, padx=(0,5))
-        ttk.Entry(tp1_frame, textvariable=tp1_value_var, width=5).pack(side=LEFT)
-        ttk.Label(tp1_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+            # Take Profit Settings
+            tp_main_label = ttk.Label(advanced_frame, text="Take Profit Levels:", font=("Helvetica", 9, "italic"))
+            tp_main_label.pack(anchor=W, pady=(10,2))
 
-        # TP2 Settings
-        tp2_frame = ttk.Frame(advanced_frame)
-        tp2_frame.pack(fill=X, pady=(2,0))
-        ttk.Label(tp2_frame, text="TP2 Type:").pack(side=LEFT, padx=(0,5))
-        tp2_type_combo = ttk.Combobox(tp2_frame, textvariable=tp2_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
-        tp2_type_combo.pack(side=LEFT, padx=(0,5))
-        ttk.Label(tp2_frame, text="TP2 Value:").pack(side=LEFT, padx=(0,5))
-        ttk.Entry(tp2_frame, textvariable=tp2_value_var, width=5).pack(side=LEFT)
-        ttk.Label(tp2_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+            # TP1 Settings
+            tp1_frame = ttk.Frame(advanced_frame)
+            tp1_frame.pack(fill=X, pady=(2,0))
+            ttk.Label(tp1_frame, text="TP1 Type:").pack(side=LEFT, padx=(0,5))
+            tp1_type_combo = ttk.Combobox(tp1_frame, textvariable=tp1_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+            tp1_type_combo.pack(side=LEFT, padx=(0,5))
+            ttk.Label(tp1_frame, text="TP1 Value:").pack(side=LEFT, padx=(0,5))
+            ttk.Entry(tp1_frame, textvariable=tp1_value_var, width=5).pack(side=LEFT)
+            ttk.Label(tp1_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
 
-        # TP3 Settings
-        tp3_frame = ttk.Frame(advanced_frame)
-        tp3_frame.pack(fill=X, pady=(2,0))
-        ttk.Label(tp3_frame, text="TP3 Type:").pack(side=LEFT, padx=(0,5))
-        tp3_type_combo = ttk.Combobox(tp3_frame, textvariable=tp3_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
-        tp3_type_combo.pack(side=LEFT, padx=(0,5))
-        ttk.Label(tp3_frame, text="TP3 Value:").pack(side=LEFT, padx=(0,5))
-        ttk.Entry(tp3_frame, textvariable=tp3_value_var, width=5).pack(side=LEFT)
-        ttk.Label(tp3_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
-    else:
-        # Hide the advanced frame if not in advanced mode
-        advanced_frame.pack_forget()
+            # TP2 Settings
+            tp2_frame = ttk.Frame(advanced_frame)
+            tp2_frame.pack(fill=X, pady=(2,0))
+            ttk.Label(tp2_frame, text="TP2 Type:").pack(side=LEFT, padx=(0,5))
+            tp2_type_combo = ttk.Combobox(tp2_frame, textvariable=tp2_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+            tp2_type_combo.pack(side=LEFT, padx=(0,5))
+            ttk.Label(tp2_frame, text="TP2 Value:").pack(side=LEFT, padx=(0,5))
+            ttk.Entry(tp2_frame, textvariable=tp2_value_var, width=5).pack(side=LEFT)
+            ttk.Label(tp2_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+
+            # TP3 Settings
+            tp3_frame = ttk.Frame(advanced_frame)
+            tp3_frame.pack(fill=X, pady=(2,0))
+            ttk.Label(tp3_frame, text="TP3 Type:").pack(side=LEFT, padx=(0,5))
+            tp3_type_combo = ttk.Combobox(tp3_frame, textvariable=tp3_type_var, values=["Percentage", "Ticks"], state="readonly", width=10)
+            tp3_type_combo.pack(side=LEFT, padx=(0,5))
+            ttk.Label(tp3_frame, text="TP3 Value:").pack(side=LEFT, padx=(0,5))
+            ttk.Entry(tp3_frame, textvariable=tp3_value_var, width=5).pack(side=LEFT)
+            ttk.Label(tp3_frame, text="(%/ticks from Entry)").pack(side=LEFT, padx=(5,0))
+
+        else:
+            advanced_frame.pack_forget() # Hide advanced settings
+            plan_type_frame.pack(fill=X, pady=(10, 5)) # Show plan type selector
+            if plan_type_disabled: # Re-apply disabled state if needed
+                plan_type_combo.config(state=DISABLED)
+            else:
+                plan_type_combo.config(state="readonly")
+
+    advanced_mode_var.trace_add("write", toggle_advanced_fields) # Add trace to toggle visibility
+    toggle_advanced_fields() # Initial call to set visibility based on current mode
 
     button_frame = ttk.Frame(main_frame)
     button_frame.pack(fill=X, pady=(10, 0))
@@ -425,31 +436,31 @@ def open_generator_window():
     ttk.Label(filters_panel_frame, text="Select Filter Options:", font=("Helvetica", 12, "bold")).pack(anchor=W, pady=(0,5))
     filter_manager = FilterManager(filters_panel_frame, advanced_mode_var)
 
-    # Advanced Mode EMA Inputs
-    if advanced_mode_var.get():
-        ema_settings_frame = ttk.LabelFrame(filters_panel_frame, text="Custom EMA Settings", padding=10)
-        ema_settings_frame.pack(fill=X, pady=(5,0), padx=5)
+    # Advanced Mode EMA Inputs - These are now handled within FilterManager
+    # if advanced_mode_var.get():
+    #     ema_settings_frame = ttk.LabelFrame(filters_panel_frame, text="Custom EMA Settings", padding=10)
+    #     ema_settings_frame.pack(fill=X, pady=(5,0), padx=5)
 
-        ema1_period_var = ttk.StringVar(value="9") # Default EMA1
-        ema2_period_var = ttk.StringVar(value="21") # Default EMA2
+    #     ema1_period_var = ttk.StringVar(value="9") # Default EMA1
+    #     ema2_period_var = ttk.StringVar(value="21") # Default EMA2
 
-        # EMA 1 Input
-        ema1_input_frame = ttk.Frame(ema_settings_frame)
-        ema1_input_frame.pack(fill=X, pady=(0,5))
-        ttk.Label(ema1_input_frame, text="EMA 1 Period:").pack(side=LEFT, padx=(0,5))
-        ttk.Entry(ema1_input_frame, textvariable=ema1_period_var, width=5).pack(side=LEFT, padx=(0,10))
+    #     # EMA 1 Input
+    #     ema1_input_frame = ttk.Frame(ema_settings_frame)
+    #     ema1_input_frame.pack(fill=X, pady=(0,5))
+    #     ttk.Label(ema1_input_frame, text="EMA 1 Period:").pack(side=LEFT, padx=(0,5))
+    #     ttk.Entry(ema1_input_frame, textvariable=ema1_period_var, width=5).pack(side=LEFT, padx=(0,10))
 
-        # EMA 2 Input
-        ema2_input_frame = ttk.Frame(ema_settings_frame)
-        ema2_input_frame.pack(fill=X)
-        ttk.Label(ema2_input_frame, text="EMA 2 Period:").pack(side=LEFT, padx=(0,5))
-        ttk.Entry(ema2_input_frame, textvariable=ema2_period_var, width=5).pack(side=LEFT)
-    else:
+    #     # EMA 2 Input
+    #     ema2_input_frame = ttk.Frame(ema_settings_frame)
+    #     ema2_input_frame.pack(fill=X)
+    #     ttk.Label(ema2_input_frame, text="EMA 2 Period:").pack(side=LEFT, padx=(0,5))
+    #     ttk.Entry(ema2_input_frame, textvariable=ema2_period_var, width=5).pack(side=LEFT)
+    # else:
         # Ensure these vars exist even if not in advanced mode, to prevent errors in on_run_detection if logic is not careful
         # However, on_run_detection already checks advanced_mode_var.get() before accessing them.
         # To be absolutely safe or if logic changes, define them:
-        ema1_period_var = ttk.StringVar(value="9") 
-        ema2_period_var = ttk.StringVar(value="21")
+        # ema1_period_var = ttk.StringVar(value="9") # These are no longer needed here
+        # ema2_period_var = ttk.StringVar(value="21") # These are no longer needed here
 
     shared_detected_stocks_list = []
     plan_type_config = {"type": "Swing Trader", "disabled": False}
@@ -526,20 +537,36 @@ def open_generator_window():
             selected_filters = filter_manager.get_selected_filters()
             trend_line_confirmation_selected = selected_filters.get("trend_line_confirmation", False)
             
-            if advanced_mode_var.get():
+            # Custom EMA values are now part of selected_filters if applicable
+            # No need for separate ema1_period_var.get() or ema2_period_var.get() here
+            # Validation for EMA values (positive integers, not equal) is now handled in the modal
+            # and when retrieving from filter_manager.get_selected_filters() which gets StringVars
+            
+            if advanced_mode_var.get() and selected_filters.get("technical", {}).get("use_custom_ema"):
                 try:
-                    # These vars are now defined inside the if advanced_mode_var.get() block for UI,
-                    # so they should be retrieved there. However, the on_run_detection itself is fine.
-                    selected_filters["ema1_period"] = int(ema1_period_var.get()) # ema1_period_var will be from the scope where it's created
-                    selected_filters["ema2_period"] = int(ema2_period_var.get()) # ema2_period_var will be from the scope where it's created
-                    if selected_filters["ema1_period"] <= 0 or selected_filters["ema2_period"] <=0:
-                        simpledialog.messagebox.showerror("Invalid EMA", "EMA periods must be positive integers.", parent=generator_window)
+                    # Ensure periods are integers if they are present
+                    ema1_str = selected_filters.get("technical", {}).get("ema1_period", "0")
+                    ema2_str = selected_filters.get("technical", {}).get("ema2_period", "0")
+                    
+                    ema1_val = int(ema1_str)
+                    ema2_val = int(ema2_str)
+
+                    if ema1_val <= 0 or ema2_val <= 0:
+                        simpledialog.messagebox.showerror("Invalid EMA", "Custom EMA periods must be positive integers.", parent=generator_window)
                         return
-                    if selected_filters["ema1_period"] == selected_filters["ema2_period"]:
-                        simpledialog.messagebox.showwarning("EMA Info", "EMA 1 and EMA 2 periods are the same.", parent=generator_window)
+                    if ema1_val == ema2_val:
+                        simpledialog.messagebox.showwarning("EMA Info", "Custom EMA 1 and EMA 2 periods are the same.", parent=generator_window)
+                    
+                    # The selected_filters already contains the string values from StringVars.
+                    # The actual conversion to int for detect_break_high_price can happen there,
+                    # or ensure detect_break_high_price handles string versions of numbers.
+                    # For now, we'll pass them as they are, assuming detect_break_high_price will handle.
+                    # If detect_break_high_price expects integers, conversion should happen before calling it.
+                    # Let's assume detect_break_high_price will handle string numbers for now.
+                    # The dict already contains 'ema1_period' and 'ema2_period' as strings.
 
                 except ValueError:
-                    simpledialog.messagebox.showerror("Invalid EMA", "EMA periods must be valid integers.", parent=generator_window)
+                    simpledialog.messagebox.showerror("Invalid EMA", "Custom EMA periods must be valid integers.", parent=generator_window)
                     return
             
             if result_text.winfo_exists():
@@ -763,19 +790,17 @@ def check_api_availability(max_retries=10):
     for attempt in range(max_retries):
         for endpoint_url in endpoints:
             try:
-                response = requests.get(endpoint_url)
+                response = requests.get(endpoint_url, timeout=5)
                 if response.status_code == 200:
                     root.after(0, lambda: api_status_label.config(text="API is available!"))
                     spinner.stop()
                     root.after(1000, show_main_page)
                     return
-                else:
-                    raise Exception("API not available")
-            except Exception as e:
+            except requests.exceptions.RequestException as e:
                 continue
 
         if attempt == max_retries - 1:
-            root.after(0, lambda: api_status_label.config(text="API is not available!"))
+            root.after(0, lambda: api_status_label.config(text="API is not available! Check connection and API status."))
             spinner.stop()
 
 def start_api_check():

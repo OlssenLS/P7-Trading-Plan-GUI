@@ -8,6 +8,8 @@ import sys
 from technicalIndicators import apply_technical_filters, get_technical_analysis_summary
 import asyncio
 
+MAX_WORKERS = 10 # Define at a suitable scope, e.g., module level
+
 # --- Path Helpers (Resource and Persistent Data) ---
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -88,7 +90,7 @@ def save_detection_history(history):
         print(f"Error saving detection history: {e}")
 
 # --- Core Stock Data Fetching and Processing ---
-def fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria, base_url, current_date_history, latest_date_for_run_dt, ema_periods=None):
+async def fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria, base_url, current_date_history, latest_date_for_run_dt):
     """Fetches and processes data for a single stock. Designed to be run in a thread."""
     try:
         endpoint_url = f"{base_url}/api/stocks/{stock}?start_date=2023-01-01"
@@ -246,21 +248,68 @@ def fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria,
                         break_reasons.append(reason)
                 
                 if broke_high:
-                    # Apply technical filters if any break high condition is met AND technical_criteria are selected
-                    if any(technical_criteria.values()):
-                        technical_filter_results = apply_technical_filters(df, technical_criteria, ema_periods) 
-                        if technical_filter_results["passed_all_selected_technical_filters"]:
-                            break_reasons.extend(technical_filter_results["passed_filters_reasons"])
-                            # Optionally, add TA summary if needed from get_technical_analysis_summary
-                            # tech_summary = get_technical_analysis_summary(df, technical_criteria, ema_periods=ema_periods)
-                            # break_reasons.append(f"TA: {tech_summary}")
-                        else:
-                            # Failed technical filters after breaking high
-                            return stock, None, f"{stock} broke high but failed technical filters: {', '.join(technical_filter_results['failed_filters_details'])}"
-                    # If no technical criteria selected, it passes this stage by default if broke_high is true
-                    return stock, (break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_for_stock_output, break_types_for_history, potential_tp_levels_from_history), None
-                else:
-                    return stock, ([], latest_close, latest_low_of_day, latest_high_of_day, {}, break_types_for_history, potential_tp_levels_from_history), f"No breaks for {stock}."
+                    passed_technical_filters = True
+                    tech_summary_for_output = "No TA requested."
+
+                    if any(tc_val for tc_key, tc_val in technical_criteria.items() if tc_key != 'use_custom_ema'): # Check if any actual filter is selected
+                        # Only run if 'use_custom_ema' is true OR other technical filters are selected.
+                        # If 'use_custom_ema' is true but no periods are set, apply_technical_filters should handle it gracefully.
+                        run_tech_filters = False
+                        if technical_criteria.get('use_custom_ema'):
+                            if technical_criteria.get('ema1_period') and technical_criteria.get('ema2_period'):
+                                run_tech_filters = True
+                        # Check if any other non-EMA technical filter is selected
+                        if any(val for key, val in technical_criteria.items() if key not in ['use_custom_ema', 'ema1_period', 'ema2_period'] and val):
+                            run_tech_filters = True
+                        
+                        if run_tech_filters:
+                            technical_filter_results = await apply_technical_filters(df, technical_criteria)
+                            passed_technical_filters = technical_filter_results["passed_all_selected_technical_filters"]
+                            if passed_technical_filters:
+                                break_reasons.extend(technical_filter_results["passed_filters_reasons"])
+                                tech_summary_for_output = await get_technical_analysis_summary(df, technical_criteria)
+                            else:
+                                # Failed technical filters after breaking high
+                                return stock, None, f"{stock} broke high but failed technical filters: {', '.join(technical_filter_results['failed_filters_details'])}"
+                        elif technical_criteria.get('use_custom_ema'): # use_custom_ema was true, but periods might be missing
+                            # This implies user wanted custom EMAs but didn't set them properly.
+                            # FilterManager modal should prevent this, but as a safeguard:
+                            return stock, None, f"{stock} broke high; Custom EMA selected but periods not properly set."
+
+                    if passed_technical_filters:
+                        return stock, (break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_for_stock_output, break_types_for_history, potential_tp_levels_from_history, tech_summary_for_output), None
+
+                else: # Not broke_high
+                    tech_summary_for_no_break_message = "No TA requested or no break." # Default message
+
+                    # Prepare criteria for TA summary of non-breaking stocks.
+                    # Standard EMAs (if selected and not in advanced mode) and other indicators (MACD, Stoch, Vol)
+                    # should be summarized, but custom EMAs should not be part of this specific summary.
+                    
+                    # Check if any non-custom-EMA technical criteria were originally selected by the user.
+                    # technical_criteria holds the original user selections.
+                    should_generate_non_custom_ema_summary = False
+                    # Check if standard EMAs were selected (this implies not using custom EMAs for this check)
+                    if not technical_criteria.get("use_custom_ema", False): # If not in user-selected custom EMA mode
+                        if technical_criteria.get('ema_20') or technical_criteria.get('ema_60'):
+                            should_generate_non_custom_ema_summary = True
+                    # Check for other general indicators
+                    if any(val for key, val in technical_criteria.items() if key in ['macd', 'stochastic', 'volume'] and val):
+                        should_generate_non_custom_ema_summary = True
+                    
+                    if should_generate_non_custom_ema_summary:
+                        # Create a temporary criteria copy that explicitly disables the custom EMA part 
+                        # for the get_technical_analysis_summary call.
+                        criteria_for_no_break_summary_display = technical_criteria.copy()
+                        criteria_for_no_break_summary_display['use_custom_ema'] = False 
+                        # Remove period keys as well, for clarity, though get_technical_analysis_summary
+                        # primarily gates on 'use_custom_ema'.
+                        criteria_for_no_break_summary_display.pop('ema1_period', None)
+                        criteria_for_no_break_summary_display.pop('ema2_period', None)
+                        
+                        tech_summary_for_no_break_message = await get_technical_analysis_summary(df, criteria_for_no_break_summary_display)
+                    
+                    return stock, None, f"No break high criteria met for {stock}. TA: {tech_summary_for_no_break_message}"
 
             elif isinstance(data, dict) and data.get("message") == "No data found":
                  return stock, None, f"No data found for {stock} via API."
@@ -275,132 +324,126 @@ def fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria,
         return stock, None, f"Error processing {stock}: {str(e)}"
 
 # --- Main Detection Function ---
-def detect_break_high_price(filters, output_list_for_plan, progress_callback, post_detection_callback, set_plan_type_callback, trend_line_confirmation_enabled):
-    """Detect break high price based on selected filters and update UI via callbacks."""
-    base_url = "https://yfinance-web-indonesia-data.vercel.app"
-    
-    os.makedirs(DATA_DIR, exist_ok=True)
-    stocks = get_stock_list()
-    
-    output_list_for_plan.clear()
-    
-    break_high_options = filters.get('break_high', {})
-    technical_options = filters.get('technical', {})
-    # Extract EMA periods if available from advanced mode (passed in main 'filters' dict)
-    custom_ema_periods = None
-    if filters.get("ema1_period") and filters.get("ema2_period"):
-        custom_ema_periods = {
-            "ema_short_period": filters["ema1_period"],
-            "ema_long_period": filters["ema2_period"]
-        }
-        progress_callback(f"Using custom EMA periods: Short={custom_ema_periods['ema_short_period']}, Long={custom_ema_periods['ema_long_period']}\n")
-    
-    only_1d_break = (break_high_options.get("1_day", False) and 
-                    not any(break_high_options.get(option, False) 
-                           for option in ["5_days", "1_month", "2_months", "3_months"]))
-    
-    if only_1d_break:
-        set_plan_type_callback("Day Trade", True)
-    else:
-        set_plan_type_callback("Swing Trader", False)
-    
-    if not any(break_high_options.values()):
-        progress_callback("Please select at least one Break High Price filter.\n")
-        post_detection_callback([], "Please select at least one Break High Price filter.\n", "", False)
-        return
-    
-    progress_callback("Starting detection (using threads)...\n")
-    if not stocks:
-        message = "Stock list is empty. Please check stocks.txt.\n"
-        progress_callback(message)
-        post_detection_callback([], message, "Detection aborted.", False)
-        return
-    
-    progress_callback(f"Total stocks to check: {len(stocks)}\n")
-    
-    detection_history = load_detection_history()
-    current_date_str = datetime.now().strftime("%Y-%m-%d")
-    latest_date_for_run_dt = datetime.now().date()
-    
-    if current_date_str not in detection_history:
-        detection_history[current_date_str] = {}
-    
-    sorted_history_dates = sorted(list(detection_history.keys()))
-    if len(sorted_history_dates) > 10:
-        for old_date_key in sorted_history_dates[:-10]:
-            if old_date_key in detection_history:
-                del detection_history[old_date_key]
-    
-    detected_stocks_for_processing = []
-    processed_count = 0
-    total_stocks = len(stocks)
+async def fetch_and_process_stock_data_wrapper(stock, break_high_criteria, technical_criteria, base_url, current_date_history, latest_date_for_run_dt):
+    # This wrapper is needed if fetch_and_process_stock_data is async and called from a sync context via executor
+    return await fetch_and_process_stock_data(stock, break_high_criteria, technical_criteria, base_url, current_date_history, latest_date_for_run_dt)
 
-    MAX_WORKERS = 10 
+def run_async_task_in_thread(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.close()
+    return result
+
+def detect_break_high_price(filters, output_list_for_plan, progress_callback, post_detection_callback, set_plan_type_callback, trend_line_confirmation_enabled):
+    progress_callback("Starting stock detection process...")
+    stock_list = get_stock_list()
+    if not stock_list:
+        progress_callback("Stock list is empty. Please check stocks.txt.")
+        post_detection_callback([], "Stock list empty.", "", False)
+        return
+
+    base_url = "https://yfinance-web-indonesia-data.vercel.app" # Consider making this configurable
+    
+    break_high_criteria = filters.get("break_high", {})
+    technical_criteria = filters.get("technical", {})
+
+    current_date_history = load_detection_history()
+    latest_date_for_run = datetime.now().strftime("%Y-%m-%d")
+
+    new_history_for_current_run = {}
+    detected_stocks_summary_data = [] 
+    total_stocks = len(stock_list)
+    processed_count = 0
+
+    # Determine plan type and if selection should be disabled
+    # Default to Swing Trader, enabled selection
+    plan_type_for_plan_window = "Swing Trader"
+    disable_plan_type_selection = False
+
+    # Example logic: If only 1-day break is selected, suggest Day Trader and disable choice.
+    active_break_filters = [k for k, v in break_high_criteria.items() if v]
+    if len(active_break_filters) == 1 and active_break_filters[0] == "1_day":
+        plan_type_for_plan_window = "Day Trader"
+        disable_plan_type_selection = True
+        progress_callback("Note: Only 1-day break selected. Plan type will be set to Day Trader.")
+    
+    set_plan_type_callback(plan_type_for_plan_window, disable_plan_type_selection)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        future_to_stock = {executor.submit(fetch_and_process_stock_data, 
-                                           stock, 
-                                           break_high_options, # Pass only break_high_options here
-                                           technical_options,  # Pass technical_options separately
-                                           base_url, 
-                                           detection_history.get(current_date_str, {}),
-                                           latest_date_for_run_dt,
-                                           custom_ema_periods # Pass custom_ema_periods
-                                           ):
-                            stock for stock in stocks}
+        future_to_stock = {}
+        for stock_name in stock_list:
+            # Pass technical_criteria which now includes custom EMA info if set
+            coro = fetch_and_process_stock_data_wrapper(
+                stock_name, 
+                break_high_criteria, 
+                technical_criteria, 
+                base_url, 
+                current_date_history.get(latest_date_for_run, {}), # Pass history for today for this stock
+                latest_date_for_run
+            )
+            future_to_stock[executor.submit(run_async_task_in_thread, coro)] = stock_name
 
         for future in concurrent.futures.as_completed(future_to_stock):
-            stock_symbol = future_to_stock[future]
+            stock_name_completed = future_to_stock[future]
+            processed_count += 1
+            progress_callback(f"Processing {stock_name_completed} ({processed_count}/{total_stocks})...")
             try:
-                stock_symbol_result, result_data, error_message = future.result()
+                stock_symbol, result_data, error_message = future.result()
                 
-                processed_count += 1
-                progress_callback(f"({processed_count}/{total_stocks}) Processed {stock_symbol_result}. ")
-
                 if error_message:
-                    progress_callback(f"Skipped: {error_message}\n")
-                    continue
-
-                if result_data:
-                    break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, break_types_hist, potential_tp_levels = result_data
+                    progress_callback(f"Skipped {stock_symbol}: {error_message}")
+                elif result_data:
+                    # result_data is (break_reasons, latest_close, latest_low, latest_high, high_prices_output, break_types_hist, potential_tp_levels, tech_summary)
+                    break_reasons_list, latest_close_val, latest_low_val, latest_high_val, high_prices_dict, break_types_dict, potential_tps_list, tech_summary_str = result_data
                     
-                    if break_reasons: # This implies it passed break_high AND technical_filters (if any were selected)
-                        detected_stocks_for_processing.append((stock_symbol_result, break_reasons, latest_close, latest_low_of_day, latest_high_of_day, high_prices_output, potential_tp_levels))
-                        progress_callback(f"Detected for {stock_symbol_result}: { ', '.join(break_reasons) }\n")
+                    progress_callback(f"Detected {stock_symbol}: Reasons - {', '.join(break_reasons_list)}. Tech Summary: {tech_summary_str}")
+                    
+                    # Store data for plan generation
+                    stock_data_for_plan = [
+                        stock_symbol, 
+                        latest_close_val, 
+                        latest_low_val, 
+                        latest_high_val, 
+                        break_reasons_list, 
+                        high_prices_dict, # Pass the dictionary of high prices
+                        potential_tps_list, # Pass potential TPs
+                        tech_summary_str # Pass tech summary
+                    ]
+                    output_list_for_plan.append(stock_data_for_plan) # This list is shared and used by the caller
+                    detected_stocks_summary_data.append(stock_data_for_plan)
 
-                        if stock_symbol_result not in detection_history[current_date_str]:
-                            detection_history[current_date_str][stock_symbol_result] = {}
-                        
-                        for key, value in break_types_hist.items():
-                             detection_history[current_date_str][stock_symbol_result][key] = value
-                        if high_prices_output: 
-                            if "high_prices" not in detection_history[current_date_str][stock_symbol_result]:
-                                detection_history[current_date_str][stock_symbol_result]["high_prices"] = {}
-                            detection_history[current_date_str][stock_symbol_result]["high_prices"].update(high_prices_output)
-                    # else: stock did not meet all criteria (either no break_high or failed technicals)
-                    # progress_callback(f"No qualifying signal for {stock_symbol_result}.\n") # Optional: for more verbose logging
+                    # Update history for this stock for the current run date
+                    if latest_date_for_run not in new_history_for_current_run:
+                        new_history_for_current_run[latest_date_for_run] = {}
+                    
+                    # Ensure high_prices_dict is stored under a 'high_prices' key if that's how it's expected later
+                    new_history_for_current_run[latest_date_for_run][stock_symbol] = {
+                        **break_types_dict, # This contains { "1d_break_date": "YYYY-MM-DD", "1d_days_since": X, ... }
+                        "high_prices": high_prices_dict # e.g., { "1d": 100, "5d": 95 }
+                    }
+
             except Exception as exc:
-                processed_count += 1
-                progress_callback(f"({processed_count}/{total_stocks}) Error processing {stock_symbol}: {exc}\n")
+                progress_callback(f"Error processing {stock_name_completed}: {exc}")
 
-    save_detection_history(detection_history)
-    output_list_for_plan.extend(detected_stocks_for_processing)
+    # After all stocks are processed, update the main detection history file
+    # Merge new_history_for_current_run into current_date_history (which was loaded at start)
+    # This ensures we don't overwrite history for other dates or other stocks on the same date if run multiple times
+    for date_key, stocks_on_date in new_history_for_current_run.items():
+        if date_key not in current_date_history:
+            current_date_history[date_key] = {}
+        for stock_key, stock_data_hist in stocks_on_date.items():
+            current_date_history[date_key][stock_key] = stock_data_hist
+            
+    save_detection_history(current_date_history)
 
-    summary_text_parts = []
-    if detected_stocks_for_processing:
-        summary_text_parts.append("Detected stocks breaking high price and meeting technical criteria:\n\n")
-        for stock_name, reasons, close, low_of_day, high_of_day, highs_info, pot_tps in detected_stocks_for_processing:
-            summary_text_parts.append(f"{stock_name}: { ', '.join(reasons) } - Close: {close:.2f}, Low: {low_of_day:.2f}, High: {high_of_day:.2f}\n")
-            if highs_info:
-                summary_text_parts.append(f"    Broken Period Highs: { {k: f'{v:.2f}' for k, v in highs_info.items()} }\n")
-            summary_text_parts.append("\n")
-    else:
-        summary_text_parts.append("No stocks meeting all selected criteria.\n")
+    summary_text = f"Detection complete. Found {len(detected_stocks_summary_data)} potential stock(s) based on criteria.\n"
+    for data in detected_stocks_summary_data:
+        summary_text += f"- {data[0]}: {', '.join(data[4])}\n" # Removed Tech: {data[7]}
+
+    final_status_message = "Ready to proceed to plan setup if stocks were detected." if detected_stocks_summary_data else "No stocks met the criteria."
     
-    final_status_message = f"\nDetection complete. Found {len(detected_stocks_for_processing)} stocks meeting all criteria.\n"
-    
-    if trend_line_confirmation_enabled and detected_stocks_for_processing:
-        progress_callback("Trend line confirmation step required. Stocks will be shown for manual review.\n")
-        post_detection_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message, True)
-
-    else:
-        post_detection_callback(detected_stocks_for_processing, "".join(summary_text_parts), final_status_message, False) 
+    # Call the post_detection_callback which might open the trend line confirmation window or directly update UI
+    post_detection_callback(detected_stocks_summary_data, summary_text, final_status_message, trend_line_confirmation_enabled and bool(detected_stocks_summary_data)) 
