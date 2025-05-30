@@ -28,106 +28,131 @@ def generate_plans_for_stocks(selected_stocks_details, plan_type="Swing Trader",
         stop_loss_val_adj = None
         tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
         entry_price_str = "N/A" # Initialize entry_price_str
+        sl_base_price = None # For SL calculation in advanced mode
+        tp_base_price = None # For TP calculation in advanced mode (effectively entry_price_actual)
 
         adj_latest_low = adjust_price_by_fraction(latest_low_of_day)
         adj_latest_high = adjust_price_by_fraction(latest_high_of_day)
         adj_latest_close = adjust_price_by_fraction(latest_close)
 
         if advanced_settings:
-            # Determine Entry Price String and Actual Entry for SL/TP calcs
             entry_type = advanced_settings.get("entry_range_type", "Low to High")
             if entry_type == "Low to High":
                 entry_price_str = f"{adj_latest_low} - {adj_latest_high}"
-                entry_price_actual = float(adj_latest_high) # For long, worst entry is high
+                sl_base_price = float(adj_latest_low)
+                tp_base_price = float(adj_latest_high)
             elif entry_type == "Low to Close":
                 entry_price_str = f"{adj_latest_low} - {adj_latest_close}"
-                entry_price_actual = float(adj_latest_close) # For long, worst entry is close if high not included
+                sl_base_price = float(adj_latest_low)
+                tp_base_price = float(adj_latest_close)
             elif entry_type == "Close to High":
                 entry_price_str = f"{adj_latest_close} - {adj_latest_high}"
-                entry_price_actual = float(adj_latest_high) # For long, worst entry is high
+                sl_base_price = float(adj_latest_close) # Assuming entry is made at close, SL should be below close
+                tp_base_price = float(adj_latest_high)
             else: # Fallback or error
                 entry_price_str = f"{adj_latest_low} - {adj_latest_high}" # Default to Low to High
-                entry_price_actual = float(adj_latest_high)
+                sl_base_price = float(adj_latest_low)
+                tp_base_price = float(adj_latest_high)
+            
+            entry_price_actual = tp_base_price # Use the higher point of the range for TP calculations
 
             # Calculate Stop Loss
             sl_def_type = advanced_settings.get("sl_definition_type", "Percentage")
             sl_value = advanced_settings.get("sl_value", 2) # Default 2% or 2 ticks
 
             if sl_def_type == "Percentage":
-                stop_loss_val_raw = entry_price_actual * (1 - (sl_value / 100.0))
+                stop_loss_val_raw = sl_base_price * (1 - (sl_value / 100.0))
                 stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
             elif sl_def_type == "Ticks":
-                stop_loss_val_adj = subtract_ticks_from_price(entry_price_actual, int(sl_value))
+                stop_loss_val_adj = subtract_ticks_from_price(sl_base_price, int(sl_value))
             else: # Fallback to percentage
-                stop_loss_val_raw = entry_price_actual * (1 - (sl_value / 100.0))
+                stop_loss_val_raw = sl_base_price * (1 - (sl_value / 100.0))
                 stop_loss_val_adj = adjust_price_by_fraction(stop_loss_val_raw)
             
-            if stop_loss_val_adj >= entry_price_actual: # Ensure SL is below entry for long
-                print(f"Warning: Calculated SL {stop_loss_val_adj} is not below entry {entry_price_actual} for {stock_name}. Adjusting SL one tick lower or re-evaluate inputs.")
-                stop_loss_val_adj = subtract_ticks_from_price(entry_price_actual, 1)
-                if stop_loss_val_adj >= entry_price_actual: # If still not below, indicates issue
-                     print(f"Critical Warning: SL adjustment failed for {stock_name}. Defaulting SL significantly lower or skipping plan.")
-                     # Potentially skip plan or set a very conservative SL
-                     stop_loss_val_adj = adjust_price_by_fraction(entry_price_actual * 0.90) # Fallback to 10% SL
+            # Ensure SL is below the SL base price (lowest point of entry range)
+            if stop_loss_val_adj >= sl_base_price:
+                print(f"Warning: Calculated SL {stop_loss_val_adj} is not below SL base {sl_base_price} for {stock_name}. Adjusting SL one tick lower.")
+                stop_loss_val_adj = subtract_ticks_from_price(sl_base_price, 1)
+                if stop_loss_val_adj >= sl_base_price: 
+                     print(f"Critical Warning: SL adjustment failed for {stock_name}. Defaulting SL significantly lower.")
+                     stop_loss_val_adj = adjust_price_by_fraction(sl_base_price * 0.90) # Fallback to 10% below SL base
 
-            # Calculate Take Profits based on R/R
-            risk_per_share = entry_price_actual - stop_loss_val_adj
-            if risk_per_share <= 0:
-                print(f"Warning: Risk per share is not positive for {stock_name} with advanced settings. SL: {stop_loss_val_adj}, Entry: {entry_price_actual}. Skipping TP calculation.")
+            # Calculate Take Profits based on R/R or direct settings
+            # Risk per share now calculated using tp_base_price (entry_price_actual) and the derived stop_loss_val_adj
+            if tp_base_price and stop_loss_val_adj: # Ensure both are valid numbers
+                risk_per_share = tp_base_price - stop_loss_val_adj
+                if risk_per_share <= 0:
+                    print(f"Warning: Risk per share is not positive for {stock_name} with advanced settings. SL: {stop_loss_val_adj}, Entry (TP Base): {tp_base_price}. Skipping TP calculation.")
+                    tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
+                else:
+                    # TP1 Calculation
+                    tp1_type = advanced_settings.get("tp1_type", "Percentage") # Default to Percentage if not specified
+                    tp1_value = advanced_settings.get("tp1_value", 3) 
+                    if tp1_type == "Percentage":
+                        tp1_val_raw = tp_base_price * (1 + (tp1_value / 100.0))
+                    elif tp1_type == "Ticks":
+                        tp1_val_raw = add_ticks_to_price(tp_base_price, int(tp1_value))
+                    else: # Fallback
+                        tp1_val_raw = tp_base_price * (1 + (tp1_value / 100.0))
+                    tp1_val_adj = adjust_price_by_fraction(tp1_val_raw)
+                    if tp1_val_adj <= tp_base_price: 
+                        print(f"Warning: TP1 {tp1_val_adj} not above TP base {tp_base_price} for {stock_name}. Setting to None.")
+                        tp1_val_adj = None 
+
+                    # TP2 Calculation
+                    if tp1_val_adj is not None:
+                        tp2_type = advanced_settings.get("tp2_type", "Percentage")
+                        tp2_value = advanced_settings.get("tp2_value", 5)
+                        if tp2_type == "Percentage":
+                            tp2_val_raw = tp_base_price * (1 + (tp2_value / 100.0))
+                        elif tp2_type == "Ticks":
+                            tp2_val_raw = add_ticks_to_price(tp_base_price, int(tp2_value))
+                        else: # Fallback
+                            tp2_val_raw = tp_base_price * (1 + (tp2_value / 100.0))
+                        tp2_val_adj_candidate = adjust_price_by_fraction(tp2_val_raw)
+                        if tp2_val_adj_candidate > tp1_val_adj:
+                            tp2_val_adj = tp2_val_adj_candidate
+                        else:
+                            print(f"Warning: TP2 candidate {tp2_val_adj_candidate} not above TP1 {tp1_val_adj} for {stock_name}. Setting TP2 to None.")
+                            tp2_val_adj = None
+                    else:
+                        tp2_val_adj = None
+
+                    # TP3 Calculation
+                    if tp2_val_adj is not None: # TP3 depends on TP2 being valid
+                        tp3_type = advanced_settings.get("tp3_type", "Percentage")
+                        tp3_value = advanced_settings.get("tp3_value", 7)
+                        if tp3_type == "Percentage":
+                            tp3_val_raw = tp_base_price * (1 + (tp3_value / 100.0))
+                        elif tp3_type == "Ticks":
+                            tp3_val_raw = add_ticks_to_price(tp_base_price, int(tp3_value))
+                        else: # Fallback
+                            tp3_val_raw = tp_base_price * (1 + (tp3_value / 100.0))
+                        tp3_val_adj_candidate = adjust_price_by_fraction(tp3_val_raw)
+                        if tp3_val_adj_candidate > tp2_val_adj:
+                            tp3_val_adj = tp3_val_adj_candidate
+                        else:
+                            print(f"Warning: TP3 candidate {tp3_val_adj_candidate} not above TP2 {tp2_val_adj} for {stock_name}. Setting TP3 to None.")
+                            tp3_val_adj = None
+                    elif tp1_val_adj is not None: # Calculate TP3 based on TP1 if TP2 is None, but TP1 exists
+                        tp3_type = advanced_settings.get("tp3_type", "Percentage")
+                        tp3_value = advanced_settings.get("tp3_value", 7) # Ensure TP3 value is typically higher than TP1's default
+                        if tp3_type == "Percentage":
+                            tp3_val_raw = tp_base_price * (1 + (tp3_value / 100.0))
+                        elif tp3_type == "Ticks":
+                            tp3_val_raw = add_ticks_to_price(tp_base_price, int(tp3_value))
+                        else: # Fallback
+                            tp3_val_raw = tp_base_price * (1 + (tp3_value / 100.0))
+                        tp3_val_adj_candidate = adjust_price_by_fraction(tp3_val_raw)
+                        if tp3_val_adj_candidate > tp1_val_adj:
+                             tp3_val_adj = tp3_val_adj_candidate
+                        else:
+                            print(f"Warning: TP3 candidate {tp3_val_adj_candidate} (based on TP1) not above TP1 {tp1_val_adj} for {stock_name}. Setting TP3 to None.")
+                            tp3_val_adj = None
+                    else: # If TP1 is also None, TP3 must be None
+                        tp3_val_adj = None
+            else: # Risk per share not positive or tp_base_price/sl_base_price invalid
                 tp1_val_adj, tp2_val_adj, tp3_val_adj = None, None, None
-            else:
-                # TP1 Calculation
-                tp1_type = advanced_settings.get("tp1_type", "Percentage")
-                tp1_value = advanced_settings.get("tp1_value", 3) # Default to 3% or 3 ticks
-                if tp1_type == "Percentage":
-                    tp1_val_raw = entry_price_actual * (1 + (tp1_value / 100.0))
-                elif tp1_type == "Ticks":
-                    tp1_val_raw = add_ticks_to_price(entry_price_actual, int(tp1_value))
-                else: # Fallback
-                    tp1_val_raw = entry_price_actual * (1 + (tp1_value / 100.0))
-                tp1_val_adj = adjust_price_by_fraction(tp1_val_raw)
-                if tp1_val_adj <= entry_price_actual: tp1_val_adj = None # Ensure TP is above entry
-
-                # TP2 Calculation
-                if tp1_val_adj is not None:
-                    tp2_type = advanced_settings.get("tp2_type", "Percentage")
-                    tp2_value = advanced_settings.get("tp2_value", 5)
-                    if tp2_type == "Percentage":
-                        tp2_val_raw = entry_price_actual * (1 + (tp2_value / 100.0))
-                    elif tp2_type == "Ticks":
-                        tp2_val_raw = add_ticks_to_price(entry_price_actual, int(tp2_value))
-                    else: # Fallback
-                        tp2_val_raw = entry_price_actual * (1 + (tp2_value / 100.0))
-                    tp2_val_adj = adjust_price_by_fraction(tp2_val_raw)
-                    if tp2_val_adj <= tp1_val_adj: tp2_val_adj = None # Ensure TP2 > TP1
-                else:
-                    tp2_val_adj = None
-
-                # TP3 Calculation
-                if tp2_val_adj is not None:
-                    tp3_type = advanced_settings.get("tp3_type", "Percentage")
-                    tp3_value = advanced_settings.get("tp3_value", 7)
-                    if tp3_type == "Percentage":
-                        tp3_val_raw = entry_price_actual * (1 + (tp3_value / 100.0))
-                    elif tp3_type == "Ticks":
-                        tp3_val_raw = add_ticks_to_price(entry_price_actual, int(tp3_value))
-                    else: # Fallback
-                        tp3_val_raw = entry_price_actual * (1 + (tp3_value / 100.0))
-                    tp3_val_adj = adjust_price_by_fraction(tp3_val_raw)
-                    if tp3_val_adj <= tp2_val_adj: tp3_val_adj = None # Ensure TP3 > TP2
-                elif tp1_val_adj is not None: # Calculate TP3 based on TP1 if TP2 is None
-                    tp3_type = advanced_settings.get("tp3_type", "Percentage")
-                    tp3_value = advanced_settings.get("tp3_value", 7)
-                    if tp3_type == "Percentage":
-                        tp3_val_raw = entry_price_actual * (1 + (tp3_value / 100.0))
-                    elif tp3_type == "Ticks":
-                        tp3_val_raw = add_ticks_to_price(entry_price_actual, int(tp3_value))
-                    else: # Fallback
-                        tp3_val_raw = entry_price_actual * (1 + (tp3_value / 100.0))
-                    tp3_val_adj = adjust_price_by_fraction(tp3_val_raw)
-                    if tp3_val_adj <= tp1_val_adj: tp3_val_adj = None # Ensure TP3 > TP1
-                else:
-                    tp3_val_adj = None
 
         else:
             # Original logic if no advanced settings
@@ -200,7 +225,7 @@ def generate_plans_for_stocks(selected_stocks_details, plan_type="Swing Trader",
 
         rr_tp1_str = "N/A" # This should be recalculated if advanced_settings are used
         if advanced_settings and entry_price_actual and stop_loss_val_adj and tp1_val_adj and (entry_price_actual - stop_loss_val_adj > 0):
-            risk = entry_price_actual - stop_loss_val_adj
+            risk = entry_price_actual - stop_loss_val_adj # entry_price_actual is tp_base_price here
             reward_tp1 = tp1_val_adj - entry_price_actual
             if risk > 0 and reward_tp1 > 0: # Ensure risk and reward are positive
                  rr_tp1_str = f"{reward_tp1/risk:.2f}:1"
